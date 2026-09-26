@@ -1,0 +1,22 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,xml,csproj,props}]
+indent_size = 2
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_sort_system_directives_first = true
+
+# Стилистические и микро-оптимизационные правила, не влияющие на корректность
+dotnet_diagnostic.CA1848.severity = none   # LoggerMessage-делегаты
+dotnet_diagnostic.CA1873.severity = none   # вычисление аргументов логирования
+dotnet_diagnostic.CA1720.severity = none   # FieldType.String — имя из предметной области
+dotnet_diagnostic.CA1861.severity = none   # массивы-литералы в тестах
+dotnet_diagnostic.CA1707.severity = none   # подчёркивания в именах тестов

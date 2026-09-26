@@ -1,0 +1,111 @@
+using ExecutorBalancer.Application;
+using ExecutorBalancer.Domain;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+
+namespace ExecutorBalancer.Infrastructure.Persistence;
+
+public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> options)
+    : DbContext(options), IBalancerDbContext
+{
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<Executor> Executors => Set<Executor>();
+    public DbSet<Assignment> Assignments => Set<Assignment>();
+    public DbSet<FieldDefinition> FieldDefinitions => Set<FieldDefinition>();
+    public DbSet<Rule> Rules => Set<Rule>();
+    public DbSet<WeightRule> WeightRules => Set<WeightRule>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+
+    public bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
+
+    public void Detach(object entity) => Entry(entity).State = EntityState.Detached;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        var model = modelBuilder;
+        model.Entity<Executor>(e =>
+        {
+            e.ToTable("executors");
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.Property(x => x.FullName).HasMaxLength(300);
+            e.Property(x => x.QualificationWeight).HasPrecision(10, 3);
+            e.Property(x => x.AttributesJson).HasColumnType("jsonb");
+        });
+
+        model.Entity<Order>(e =>
+        {
+            e.ToTable("orders");
+            e.Property(x => x.Id).ValueGeneratedNever();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Weight).HasPrecision(10, 3);
+            e.Property(x => x.AttributesJson).HasColumnType("jsonb");
+            e.Property(x => x.PendingReason).HasMaxLength(300);
+            e.HasIndex(x => x.ParentId);
+            e.HasIndex(x => new { x.Status, x.ExecutorId });
+        });
+
+        model.Entity<Assignment>(e =>
+        {
+            e.ToTable("assignments");
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.OrderWeight).HasPrecision(10, 3);
+            e.Property(x => x.Score).HasPrecision(18, 6);
+            e.Property(x => x.ExplanationJson).HasColumnType("jsonb");
+            // вторая линия защиты от двойного назначения: текущее решение по заявке только одно
+            e.HasIndex(x => x.OrderId, "ux_assignments_current_order").IsUnique().HasFilter("\"IsCurrent\"");
+            e.HasIndex(x => x.OrderId, "ix_assignments_order");
+            e.HasIndex(x => x.CreatedAt, "ix_assignments_created_at");
+        });
+
+        model.Entity<FieldDefinition>(e =>
+        {
+            e.ToTable("field_definitions");
+            e.Property(x => x.Owner).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Type).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Key).HasMaxLength(48);
+            e.Property(x => x.Label).HasMaxLength(120);
+            e.HasIndex(x => new { x.Owner, x.Key }).IsUnique();
+        });
+
+        model.Entity<Rule>(e =>
+        {
+            e.ToTable("rules");
+            e.Property(x => x.Name).HasMaxLength(160);
+            e.Property(x => x.OrderField).HasMaxLength(48);
+            e.Property(x => x.Operator).HasConversion<string>().HasMaxLength(32);
+            e.Property(x => x.Target).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.ExecutorField).HasMaxLength(48);
+            e.Property(x => x.ExecutorFieldUpper).HasMaxLength(48);
+            e.Property(x => x.ValueJson).HasColumnType("jsonb");
+        });
+
+        model.Entity<WeightRule>(e =>
+        {
+            e.ToTable("weight_rules");
+            e.Property(x => x.OrderField).HasMaxLength(48);
+            e.Property(x => x.Operator).HasConversion<string>().HasMaxLength(32);
+            e.Property(x => x.ValueJson).HasColumnType("jsonb");
+            e.Property(x => x.Weight).HasPrecision(10, 3);
+        });
+
+        model.Entity<OutboxMessage>(e =>
+        {
+            e.ToTable("outbox_messages");
+            e.Property(x => x.LastError).HasMaxLength(500);
+            e.HasIndex(x => new { x.SentAt, x.NextAttemptAt });
+        });
+
+        model.Entity<AuditEntry>(e =>
+        {
+            e.ToTable("audit_entries");
+            e.Property(x => x.Actor).HasMaxLength(100);
+            e.Property(x => x.Action).HasMaxLength(50);
+            e.Property(x => x.Entity).HasMaxLength(50);
+            e.Property(x => x.EntityId).HasMaxLength(50);
+            e.Property(x => x.DataJson).HasColumnType("jsonb");
+            e.HasIndex(x => x.CreatedAt);
+        });
+    }
+}

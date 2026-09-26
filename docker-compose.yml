@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: balancer
+      POSTGRES_USER: balancer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balancer -d balancer"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?задайте REDIS_PASSWORD в .env}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: src/ExecutorBalancer.Api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=balancer;Username=balancer;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__Redis: redis:6379,password=${REDIS_PASSWORD}
+      Integration__ApiKey: ${INTEGRATION_API_KEY:?задайте INTEGRATION_API_KEY в .env}
+      Admin__Password: ${ADMIN_PASSWORD:?задайте ADMIN_PASSWORD в .env}
+      Ais__BaseUrl: http://ais:8080
+      Ais__ApiKey: ${AIS_API_KEY:?задайте AIS_API_KEY в .env}
+      Swagger__Enabled: ${SWAGGER_ENABLED:-false}
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/app
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  ais:
+    build:
+      context: .
+      dockerfile: src/AisEmulator.Api/Dockerfile
+    environment:
+      Balancer__BaseUrl: http://api:8080
+      Balancer__ApiKey: ${INTEGRATION_API_KEY}
+      Ais__ApiKey: ${AIS_API_KEY}
+    ports:
+      - "127.0.0.1:8081:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

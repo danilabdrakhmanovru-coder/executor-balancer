@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Executor Balancer</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <section id="login" class="login hidden">
+    <form id="login-form" class="card login-card">
+      <h1>Executor Balancer</h1>
+      <p class="muted">Вход администратора</p>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Пароль" required>
+      <button type="submit">Войти</button>
+      <p id="login-error" class="error"></p>
+    </form>
+  </section>
+
+  <main id="app" class="hidden">
+    <header class="topbar">
+      <div>
+        <h1>Executor Balancer</h1>
+        <span class="muted">распределение заявок в реальном времени</span>
+      </div>
+      <div class="topbar-right">
+        <span id="updated" class="muted"></span>
+        <button id="logout" class="ghost">Выйти</button>
+      </div>
+    </header>
+
+    <section class="tiles" id="tiles"></section>
+    <p id="rule-errors" class="error"></p>
+
+    <section class="grid">
+      <div class="card">
+        <div class="card-head">
+          <h2>Исполнители</h2>
+          <span class="muted">полоса — нагрузка на единицу квалификации</span>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th>Сегодня / лимит</th></tr>
+            </thead>
+            <tbody id="executors"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Лента назначений</h2>
+          <form id="lookup" class="lookup">
+            <input id="lookup-id" type="number" min="1" placeholder="№ заявки">
+            <button type="submit" class="ghost">Найти</button>
+          </form>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th>Score</th></tr></thead>
+            <tbody id="feed"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="details">
+    <div class="dialog-head">
+      <h2 id="details-title"></h2>
+      <button id="details-close" class="ghost">Закрыть</button>
+    </div>
+    <div id="details-body"></div>
+  </dialog>
+</body>
+</html>
