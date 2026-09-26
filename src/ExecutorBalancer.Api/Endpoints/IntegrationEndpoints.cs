@@ -141,7 +141,7 @@ public static class IntegrationEndpoints
         try
         {
             await balancer.UpsertExecutorAsync(departmentId, new IncomingExecutor(id, request.FullName!.Trim(), request.IsActive,
-                request.DailyLimit, request.QualificationWeight, request.Attributes ?? NoAttributes), ct);
+                request.DailyLimit, request.QualificationWeight, request.Attributes ?? NoAttributes, request.ExtraPercent), ct);
             return Results.NoContent();
         }
         catch (InvalidInputException ex)

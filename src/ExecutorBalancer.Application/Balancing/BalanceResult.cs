@@ -40,4 +40,5 @@ public sealed record IncomingExecutor(
     bool IsActive,
     int? DailyLimit,
     decimal? QualificationWeight,
-    IReadOnlyDictionary<string, JsonElement> Attributes);
+    IReadOnlyDictionary<string, JsonElement> Attributes,
+    int? ExtraPercent = null);

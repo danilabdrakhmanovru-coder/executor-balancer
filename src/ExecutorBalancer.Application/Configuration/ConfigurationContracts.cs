@@ -84,3 +84,15 @@ public sealed record AuditView(long Id, string Actor, string Action, string Enti
 
 public sealed record PresetView(string Id, string Title, string Description, string[] OrderFields, string[] ExecutorFields,
     bool IsCurrent);
+
+/// <summary>Настройки мотивации отдела: рейтинг, режим «больше нормы», защита от работы на количество.</summary>
+public sealed record MotivationInput(
+    int FastCloseSeconds,
+    decimal ReworkPenalty,
+    decimal FastClosePenalty,
+    int MaxExtraPercent,
+    decimal QualityThreshold,
+    decimal HeavyQualityThreshold,
+    decimal HeavyWeight);
+
+public sealed record ExtraModeInput(int Percent);

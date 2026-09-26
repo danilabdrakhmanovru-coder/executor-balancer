@@ -8,7 +8,8 @@ public sealed record ExecutorProfile(
     bool IsActive,
     int? DailyLimit,
     decimal QualificationWeight,
-    IReadOnlyDictionary<string, FieldValue> Values);
+    IReadOnlyDictionary<string, FieldValue> Values,
+    int ExtraPercent = 0);
 
 /// <summary>Неизменяемый срез конфигурации: справочник полей, правила и исполнители.</summary>
 public sealed class BalancerSnapshot
@@ -21,6 +22,7 @@ public sealed class BalancerSnapshot
     public required IReadOnlyList<CompiledWeightRule> WeightRules { get; init; }
     public required IReadOnlyDictionary<long, ExecutorProfile> Executors { get; init; }
     public required decimal DefaultOrderWeight { get; init; }
+    public Motivation Motivation { get; init; } = Motivation.Default;
 
     public decimal OrderWeight(IReadOnlyDictionary<string, FieldValue> order) =>
         WeightRules.FirstOrDefault(rule => rule.Condition.Matches(order))?.Weight ?? DefaultOrderWeight;

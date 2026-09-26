@@ -35,12 +35,20 @@ public enum LoadRelease
     Rollback,
 }
 
-/// <param name="DailyLimit">null — без лимита или лимит не применяется.</param>
-public sealed record CandidateSlot(long ExecutorId, long QualificationMilli, int? DailyLimit);
+/// <param name="DailyLimit">Норма — суточный лимит; null — без лимита или лимит не применяется.</param>
+/// <param name="ExtraLimit">Потолок в режиме «больше нормы»; null — как норма. Сверх нормы исполнитель получает
+/// заявку, только если ни у кого из подходящих норма ещё не набрана.</param>
+public sealed record CandidateSlot(long ExecutorId, long QualificationMilli, int? DailyLimit, int? ExtraLimit = null)
+{
+    /// <summary>Потолок для скрипта выбора: не меньше нормы; -1 — без лимита.</summary>
+    public int Cap => DailyLimit is { } limit ? Math.Max(limit, ExtraLimit ?? limit) : -1;
+}
 
 /// <param name="Reopen">Заявка возвращается в рассмотрение: прежнее назначение можно заменить.</param>
+/// <param name="CountsTowardDaily">Засчитать в суточную норму. Нет — та же заявка вернулась с доработки
+/// к тому же исполнителю: это не новая заявка за день.</param>
 public sealed record PickRequest(long OrderId, long WeightMilli, DateOnly Day, bool Reopen,
-    IReadOnlyList<CandidateSlot> Candidates);
+    IReadOnlyList<CandidateSlot> Candidates, bool CountsTowardDaily = true);
 
 public enum PickStatus
 {
@@ -49,7 +57,8 @@ public enum PickStatus
     NoCandidate,
 }
 
-/// <param name="Verdict">eligible, inactive или daily_limit_exceeded.</param>
+/// <param name="Verdict">eligible, over_norm (норма набрана, но режим «больше нормы» позволяет ещё),
+/// inactive или daily_limit_exceeded.</param>
 public sealed record SlotReport(long ExecutorId, string Verdict, long OpenWeightMilli, int AssignedToday);
 
 /// <param name="HeldSince">С какого момента заявка закреплена за исполнителем в хранилище нагрузки.

@@ -84,7 +84,7 @@ internal sealed class StartupInitializer(
             .Select(o => new { o.Id, ExecutorId = o.ExecutorId!.Value, o.Weight })
             .ToListAsync(cancellationToken);
         var today = await db.Assignments.AsNoTracking()
-            .Where(a => a.CreatedAt >= dayStart)
+            .Where(a => a.CreatedAt >= dayStart && a.Kind != AssignmentKind.Secondary) // возвраты с доработки — не новые заявки
             .GroupBy(a => a.ExecutorId)
             .Select(g => new { ExecutorId = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);

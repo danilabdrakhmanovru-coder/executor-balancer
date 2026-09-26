@@ -35,6 +35,11 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.Name).HasMaxLength(120);
             e.Property(x => x.PresetId).HasMaxLength(32);
             e.HasIndex(x => x.Code).IsUnique();
+            e.Property(x => x.ReworkPenalty).HasPrecision(4, 3);
+            e.Property(x => x.FastClosePenalty).HasPrecision(4, 3);
+            e.Property(x => x.QualityThreshold).HasPrecision(4, 3);
+            e.Property(x => x.HeavyQualityThreshold).HasPrecision(4, 3);
+            e.Property(x => x.HeavyWeight).HasPrecision(10, 3);
         });
 
         model.Entity<Executor>(e =>
@@ -54,6 +59,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.Id).ValueGeneratedNever();
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Weight).HasPrecision(10, 3);
+            e.Property(x => x.Points).HasPrecision(10, 3);
             e.Property(x => x.AttributesJson).HasColumnType("jsonb");
             e.Property(x => x.PendingReason).HasMaxLength(300);
             e.HasIndex(x => x.ParentId);
@@ -138,6 +144,8 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.HasIndex(x => new { x.DepartmentId, x.BucketHour });
             e.Property(x => x.AssignedWeight).HasPrecision(18, 3);
             e.Property(x => x.FreeWeight).HasPrecision(18, 3);
+            e.Property(x => x.ClosedWeight).HasPrecision(18, 3);
+            e.Property(x => x.Points).HasPrecision(18, 3);
         });
 
         model.Entity<EligibilityHourStat>(e =>

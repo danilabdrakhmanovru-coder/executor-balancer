@@ -125,3 +125,29 @@ export function diverging(container, items, { limit = 2 } = {}) {
   });
   text(svg, zero, height - 6, `коридор ±${limit}%`, 'axis');
 }
+
+/**
+ * «Количество против качества»: точка — сотрудник, по X — сколько закрыл, по Y — качество в процентах.
+ * Пунктир — порог, ниже которого режим «больше нормы» приостанавливается.
+ */
+export function scatter(container, points, { height = 240, threshold = null, empty = 'Нет данных' } = {}) {
+  if (!points.length) { container.textContent = empty; return; }
+  const { svg, width } = frame(container, height);
+  const left = 44, right = 16, top = 12, bottom = 34;
+  const plotW = width - left - right, plotH = height - top - bottom;
+  const maxX = niceMax(Math.max(1, ...points.map((p) => p.x)));
+  const y = (value) => top + plotH - (value / 100) * plotH;
+  yAxis(svg, 100, left, top, plotW, plotH);
+  for (const f of [0, 0.5, 1]) text(svg, left + f * plotW, height - 18, number.format(maxX * f));
+  text(svg, left + plotW / 2, height - 3, 'закрыто заявок →');
+  if (threshold !== null) {
+    node('line', { x1: left, x2: left + plotW, y1: y(threshold), y2: y(threshold), class: 'threshold' }, svg);
+    text(svg, left + plotW - 2, y(threshold) - 4, `порог ${number.format(threshold)}%`, 'axis', 'end');
+  }
+  for (const p of points) {
+    const cx = left + (p.x / maxX) * plotW;
+    const dot = node('circle', { cx, cy: y(p.y), r: 6, class: p.cls || 'dev-ok' }, svg);
+    tip(dot, p.title || `${p.label}: ${p.x} закрыто, качество ${number.format(p.y)}%`);
+    text(svg, cx + 9, y(p.y) + 4, p.label, 'axis', 'start');
+  }
+}

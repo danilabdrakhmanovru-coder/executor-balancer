@@ -71,13 +71,16 @@ public static class DashboardEndpoints
         csv.AppendLine();
         csv.AppendLine(Row("ID", "Исполнитель", "Активен", "Квалификация", "Назначено", "Вес назначенных",
             "Первичные", "Перераспределения", "От родителя", "Вторичные", "Вес свободного выбора",
-            "Справедливый вес", "Отклонение, %", "Решено и отклонено", "На доработку", "Доля возвратов, %"));
+            "Справедливый вес", "Отклонение, %", "Решено и отклонено", "На доработку", "Доля возвратов, %",
+            "Место в рейтинге", "Баллы рейтинга", "Качество, %", "Закрыто подозрительно быстро", "Сверх нормы"));
         foreach (var e in report.Executors)
         {
             csv.AppendLine(Row(Number(e.Id), Text(e.Name), e.IsActive ? "да" : "нет", Number(e.Qualification),
                 Number(e.Assigned), Number(e.AssignedWeight), Number(e.Primary), Number(e.Reassign), Number(e.Parent),
                 Number(e.Secondary), Number(e.FreeWeight), Number(e.FairWeight), Number(e.DeviationPercent),
-                Number(e.Closed), Number(e.Returned), Number(e.ReturnRatePercent)));
+                Number(e.Closed), Number(e.Returned), Number(e.ReturnRatePercent),
+                e.Rank is { } rank ? Number(rank) : "вне рейтинга", Number(e.Points), Number(e.Quality is { } q ? Math.Round(q * 100m, 1) : null), Number(e.FastClosed),
+                Number(e.Extra)));
         }
 
         csv.AppendLine();
@@ -101,12 +104,13 @@ public static class DashboardEndpoints
     }
 
     private static async Task<IResult> Summary(DepartmentScope d, IBalancerDbContext db, ExecutorDirectory directory, ILoadStore loads,
-        OrderBalancer balancer, AnalyticsService analytics, CancellationToken ct)
+        OrderBalancer balancer, AnalyticsService analytics, QualityTracker quality, CancellationToken ct)
     {
         var today = await analytics.BuildAsync(d.Id, AnalyticsPeriod.Today, ct);
         var deviations = today.Executors.ToDictionary(e => e.Id, e => e.DeviationPercent);
         var snapshot = await directory.GetAsync(d.Id, ct);
         var current = await loads.GetLoadsAsync(balancer.Today(), ct);
+        var scores = await quality.GetAsync(d.Id, ct);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
 
         var orders = db.Orders.Where(o => o.DepartmentId == d.Id);
@@ -135,6 +139,10 @@ public static class DashboardEndpoints
                     // нагрузка на единицу квалификации — именно её выравнивает алгоритм
                     RelativeLoad = Math.Round(openWeight / e.QualificationWeight, 3),
                     DeviationPercent = deviations.GetValueOrDefault(e.Id),
+                    // режим «больше нормы» и качество за последние дни (защита от работы на количество)
+                    e.ExtraPercent,
+                    Extra = snapshot.Motivation.Extra(e, scores.GetValueOrDefault(e.Id), 0m),
+                    Quality = scores.GetValueOrDefault(e.Id),
                     // что умеет исполнитель: параметры из справочника с человеческими названиями
                     Skills = snapshot.Catalog.All
                         .Where(f => f.Owner == FieldOwner.Executor && e.Values.ContainsKey(f.Key))

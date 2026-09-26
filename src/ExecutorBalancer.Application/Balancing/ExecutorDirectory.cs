@@ -122,7 +122,8 @@ public sealed class ExecutorDirectory(
         var profiles = executors.ToDictionary(
             e => e.Id,
             e => new ExecutorProfile(e.Id, e.FullName, e.IsActive, e.DailyLimit, e.QualificationWeight,
-                catalog.ParseStored(FieldOwner.Executor, e.AttributesJson)));
+                catalog.ParseStored(FieldOwner.Executor, e.AttributesJson), e.ExtraPercent));
+        var department = await db.Departments.AsNoTracking().FirstOrDefaultAsync(d => d.Id == departmentId, cancellationToken);
 
         return new BalancerSnapshot
         {
@@ -134,6 +135,7 @@ public sealed class ExecutorDirectory(
             WeightRules = weightRules,
             Executors = profiles,
             DefaultOrderWeight = options.Value.DefaultOrderWeight,
+            Motivation = department is null ? Motivation.Default : Motivation.From(department),
         };
     }
 }

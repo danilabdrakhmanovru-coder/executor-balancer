@@ -12,6 +12,7 @@ import { refreshExecutors, setExecutorsEditable } from './executors.js';
 import { renderPresets } from './presets.js';
 import { initDepartments, loadDepartments } from './department.js';
 import { initDepartmentsAdmin, refreshDepartments } from './departments.js';
+import { initMotivation, refreshMotivation } from './motivation.js';
 
 const TABS = {
   overview: { refresh: refreshOverview, every: 2000 },
@@ -28,12 +29,13 @@ const TABS = {
     },
   },
   preview: { refresh: async () => { await refreshConstructor(); buildPreviewForm(currentConfig()); } },
+  motivation: { refresh: refreshMotivation },
   departments: { refresh: refreshDepartments },
   audit: { refresh: refreshAudit },
   demo: { refresh: refreshDemo, every: 2000 },
 };
 // разделы «Настроек»: во вкладках одна кнопка, внутри — подменю
-const SETTINGS = ['constructor', 'preview', 'departments'];
+const SETTINGS = ['constructor', 'motivation', 'preview', 'departments'];
 
 let active = 'overview';
 let demoEnabled = false;
@@ -156,6 +158,7 @@ initAudit();
 initDemo();
 initDepartments(departmentChanged);
 initDepartmentsAdmin();
+initMotivation();
 $('preview-sample').addEventListener('click', fillSample);
 
 api('/api/auth/me').then(showApp).catch(() => showLogin());

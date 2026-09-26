@@ -18,6 +18,7 @@ public static class DependencyInjection
 
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<ExecutorDirectory>();
+        services.AddSingleton<QualityTracker>();
         services.AddScoped<OrderBalancer>();
         services.AddScoped<ConfigurationService>();
         services.AddScoped<DepartmentService>();

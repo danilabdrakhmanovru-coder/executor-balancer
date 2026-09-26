@@ -1,7 +1,7 @@
-// Аналитика: периоды, динамика, справедливость по исполнителям, типы назначений, выгрузка.
+// Аналитика: периоды, динамика, справедливость, рейтинг и «количество против качества», типы назначений, выгрузка.
 import { api, scoped } from './api.js';
-import { $, el, row, fmt, deviation, emptyRow, tile } from './dom.js';
-import { lines, diverging, columns } from './charts.js';
+import { $, el, row, fmt, deviation, emptyRow, tile, badge } from './dom.js';
+import { lines, diverging, columns, scatter } from './charts.js';
 
 const PERIODS = ['today', '24h', '7d', '30d'];
 let period = 'today';
@@ -54,8 +54,48 @@ function renderExecutors(executors) {
   ], e.isActive ? '' : 'inactive')));
 }
 
+const percent = (share) => (share === null || share === undefined ? null : Math.round(share * 1000) / 10);
+
+/** Рейтинг: больше баллов — выше; качество ниже порога подсвечивается. */
+function renderRating(executors, motivation) {
+  const threshold = percent(motivation.qualityThreshold);
+  // место — только при качестве не ниже порога; остальные ниже, с пометкой «вне рейтинга»
+  const rated = executors.filter((e) => e.closed > 0 || e.extra > 0)
+    .sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.points - a.points);
+  $('an-rating-hint').textContent = `Место в рейтинге — по баллам, но только при качестве от ${fmt(threshold)}%: `
+    + 'иначе быстрый и небрежный сотрудник обошёл бы всех за счёт количества. Качество оценивается от 5 закрытых заявок; '
+    + 'ниже порога приостанавливается и режим «больше нормы».';
+  if (!rated.length) {
+    $('an-rating').replaceChildren(emptyRow(8, 'За период ещё нет закрытых заявок'));
+  } else {
+    $('an-rating').replaceChildren(...rated.map((e) => {
+      const q = percent(e.quality);
+      const quality = q === null ? '—' : badge(`${fmt(q)}%`, q < threshold ? 'bad' : q < percent(motivation.heavyQualityThreshold) ? 'warn' : 'ok');
+      const name = el('span');
+      name.append(el('span', e.name));
+      if (e.rank && e.rank <= 3) name.append(' ', badge(`${e.rank} место`, 'ok'));
+      let place = e.rank ? String(e.rank) : '—';
+      if (!e.rank && e.closed > 0) {
+        const out = badge('вне рейтинга', 'bad');
+        out.title = `Качество ${fmt(q)}% ниже порога ${fmt(threshold)}% — баллы за количество не засчитываются в рейтинг`;
+        name.append(' ', out);
+        place = '—';
+      }
+      return row([place, name, fmt(e.points), fmt(e.closed), quality, fmt(e.fastClosed), fmt(e.returned),
+        fmt(e.extra)], e.rank || !e.closed ? (e.isActive ? '' : 'inactive') : 'warn-row');
+    }));
+  }
+  scatter($('an-scatter'), rated.filter((e) => e.quality !== null).map((e) => ({
+    x: e.closed, y: percent(e.quality), label: e.name.split(' ')[0],
+    cls: percent(e.quality) < threshold ? 'dev-bad' : 'dev-ok',
+  })), { threshold, empty: 'Точки появятся, когда у сотрудников наберётся хотя бы по 5 закрытых заявок' });
+}
+
 export async function refreshAnalytics() {
-  const report = await api(`/api/dashboard/analytics?period=${encodeURIComponent(period)}`);
+  const [report, motivation] = await Promise.all([
+    api(`/api/dashboard/analytics?period=${encodeURIComponent(period)}`),
+    api('/api/admin/motivation'),
+  ]);
   renderTiles(report);
   const labels = report.timeline.map((p) => label(p, report.bucketHours));
   lines($('an-timeline'), labels, [
@@ -70,8 +110,10 @@ export async function refreshAnalytics() {
     { label: 'перераспред.', value: k.reassign },
     { label: 'от родителя', value: k.parent },
     { label: 'вторичные', value: k.secondary },
+    { label: 'сверх нормы', value: k.extra },
   ], { cls: 'series-b' });
   renderExecutors(report.executors);
+  renderRating(report.executors, motivation);
 }
 
 function select(value) {

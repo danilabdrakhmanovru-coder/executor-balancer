@@ -58,6 +58,16 @@ public static class AdminEndpoints
 
         group.MapPost("/preview", Preview);
 
+        // мотивация: рейтинг, режим «больше нормы», защита от работы на количество
+        group.MapGet("/motivation", async (DepartmentScope d, ConfigurationService config, CancellationToken ct) =>
+            await config.GetMotivationAsync(d.Id, ct) is { } m ? Results.Ok(m) : NotFound());
+        group.MapPut("/motivation", async (DepartmentScope d, MotivationInput input, ConfigurationService config,
+                CancellationToken ct) =>
+            await config.UpdateMotivationAsync(d.Id, input, ct) is { } m ? Results.Ok(m) : NotFound());
+        group.MapPut("/executors/{id:long}/extra", async (DepartmentScope d, long id, ExtraModeInput input,
+                ConfigurationService config, CancellationToken ct) =>
+            await config.SetExtraModeAsync(d.Id, id, input, ct) ? Results.NoContent() : NotFound());
+
         // отделы: список общий, изменения — только пустых отделов (см. DepartmentService)
         group.MapGet("/departments", (DepartmentService departments, CancellationToken ct) => departments.ListAsync(ct));
         group.MapPost("/departments", async (DepartmentInput input, DepartmentService departments, CancellationToken ct) =>

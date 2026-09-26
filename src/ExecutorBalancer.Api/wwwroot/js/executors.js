@@ -1,11 +1,13 @@
 // Исполнители: кто есть, что умеет, насколько загружен. При включённом пульте — правка через АИС,
 // как в жизни: настройки исполнителей хранятся во внешней системе, балансировщик получает их от неё.
 import { api, problemText } from './api.js';
-import { $, el, badge, button, fmt, toast, field, input, checkbox } from './dom.js';
+import { $, el, badge, button, fmt, toast, field, input, checkbox, select } from './dom.js';
 import { attributeForm } from './forms.js';
 import { openEditor } from './editor.js';
+import { todayCell } from './overview.js';
 
 let demoEnabled = false;
+let thresholds = { qualityThreshold: 0.8, heavyQualityThreshold: 0.9 };
 
 export function setExecutorsEditable(enabled) { demoEnabled = enabled; }
 
@@ -17,32 +19,72 @@ function card(e, source) {
   head.append(el('strong', e.fullName), e.isActive ? badge('на работе', 'ok') : badge('не работает', 'bad'));
   box.append(head);
 
-  const limit = e.dailyLimit == null ? 'без лимита' : `лимит ${e.dailyLimit} в день`;
-  const reached = e.dailyLimit != null && e.assignedToday >= e.dailyLimit;
   const stats = el('div', null, 'executor-stats');
+  const today = el('span', 'сегодня / норма ');
+  today.append(todayCell(e));
   stats.append(
     el('span', `квалификация ${fmt(e.qualificationWeight)}`),
     el('span', `в работе ${e.openCount}`),
-    el('span', `сегодня ${e.assignedToday}`, reached ? 'warn-text' : ''),
-    el('span', limit, reached ? 'warn-text' : ''),
+    today,
   );
   box.append(stats);
+  box.append(qualityLine(e));
 
   const skills = el('dl', null, 'skills');
   for (const s of e.skills || []) skills.append(el('dt', s.label), el('dd', s.value));
   if (!(e.skills || []).length) skills.append(el('dd', 'параметры не заданы', 'muted'));
   box.append(skills);
 
+  const actions = el('div', null, 'row-actions');
+  if (e.dailyLimit != null) {
+    actions.append(button(e.extraPercent > 0 ? `Больше нормы: +${e.extraPercent}%` : 'Больше нормы…', () => extraMode(e),
+      e.extraPercent > 0 ? 'btn btn-sm btn-success' : 'btn btn-sm', 'flame'));
+  }
   if (demoEnabled && source) {
-    const actions = el('div', null, 'row-actions');
     actions.append(
       button(e.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(e, !e.isActive),
         'btn btn-sm', e.isActive ? 'coffee' : 'user-check'),
       button('Изменить', () => edit(source), 'btn btn-sm', 'pencil'),
     );
-    box.append(actions);
   }
+  if (actions.childElementCount) box.append(actions);
   return card;
+}
+
+/** Качество за 7 дней: баллы / максимально возможные баллы; от него зависит режим «больше нормы». */
+function qualityLine(e) {
+  const q = e.quality;
+  const line = el('div', null, 'executor-quality');
+  if (!q || q.quality === null || q.quality === undefined) {
+    line.append(el('span', `качество: ещё не оценено (закрыто за 7 дней: ${q?.closed ?? 0}, нужно от 5)`, 'muted'));
+    return line;
+  }
+  const value = Math.round(q.quality * 1000) / 10;
+  line.append(el('span', 'качество за 7 дней '), badge(`${fmt(value)}%`, q.quality < thresholds.qualityThreshold ? 'bad'
+      : q.quality < thresholds.heavyQualityThreshold ? 'warn' : 'ok'),
+    el('span', ` · баллов ${fmt(q.points)} · закрыто ${fmt(q.closed)} · быстрых ${fmt(q.fastClosed)} · доработок ${fmt(q.returned)}`, 'muted'));
+  return line;
+}
+
+/** Режим «готов взять больше нормы»: процент сверх нормы, не выше потолка отдела. */
+async function extraMode(e) {
+  const motivation = await api('/api/admin/motivation');
+  const max = motivation.maxExtraPercent;
+  const steps = [0, 10, 20, 30, 50, 100].filter((p) => p <= max);
+  if (!steps.includes(e.extraPercent)) steps.push(e.extraPercent);
+  const percent = select(steps.sort((a, b) => a - b).map((p) => [String(p), p === 0 ? 'выключен' : `+${p}% к норме`]), String(e.extraPercent));
+  openEditor(`Больше нормы: ${e.fullName}`, [
+    el('p', `Норма — ${e.dailyLimit} заявок в день. В режиме сотрудник получает сверх нормы только излишки — заявки, `
+      + 'которые иначе ждали бы, потому что у всех подходящих коллег норма уже набрана. Ни у кого ничего не забирается.', 'hint'),
+    field('Готов взять', percent, max > 0 ? `Потолок отдела — +${max}%. Меняется в «Настройки → Рейтинг и сверхнорма».`
+      : 'В отделе режим выключен (потолок 0%).'),
+    el('p', `Защита: при качестве ниже ${Math.round(motivation.qualityThreshold * 100)}% режим приостанавливается сам; `
+      + `сложные заявки (вес от ${fmt(motivation.heavyWeight)}) сверх нормы — только при качестве от `
+      + `${Math.round(motivation.heavyQualityThreshold * 100)}%.`, 'hint'),
+  ], async () => {
+    await api(`/api/admin/executors/${e.id}/extra`, { method: 'PUT', body: { percent: Number(percent.value) } });
+    toast(Number(percent.value) > 0 ? `${e.fullName}: режим «больше нормы» +${percent.value}%` : `${e.fullName}: режим выключен`);
+  }, refreshExecutors);
 }
 
 async function setActive(e, active) {
@@ -84,10 +126,12 @@ async function edit(source) {
 }
 
 export async function refreshExecutors() {
-  const [summary, sources] = await Promise.all([
+  const [summary, sources, motivation] = await Promise.all([
     api('/api/dashboard/summary'),
     demoEnabled ? api('/api/admin/demo/executors').catch(() => []) : Promise.resolve([]),
+    api('/api/admin/motivation'),
   ]);
+  thresholds = motivation;
   const byId = new Map(sources.map((s) => [s.id, s]));
   const list = $('executors-list');
   if (!summary.executors.length) {

@@ -1,11 +1,14 @@
 // Объяснение решения: кто рассматривался, почему отсеян, какой score, почему выбран.
 import { el, row, badge, fmt } from './dom.js';
 
-export const KIND = { Primary: 'первичная', Parent: 'от родителя', Secondary: 'вторичная', Reassign: 'перераспределение' };
+export const KIND = {
+  Primary: 'первичная', Parent: 'от родителя', Secondary: 'вторичная', Reassign: 'перераспределение', Extra: 'сверх нормы',
+};
 
 const VERDICT = {
   chosen: ['выбран', 'ok'], eligible: ['подходил', ''], matched: ['подходил', ''],
   rule_failed: ['не подходит', 'bad'], inactive: ['неактивен', 'bad'], daily_limit_exceeded: ['лимит исчерпан', 'warn'],
+  over_norm: ['норма набрана', 'warn'],
 };
 
 export function renderExplanation(x) {
@@ -20,7 +23,7 @@ export function renderExplanation(x) {
   const head = el('thead');
   head.append(row(['Сотрудник', 'Решение', 'Оценка', 'Сегодня', 'Почему']));
   const body = el('tbody');
-  const order = { chosen: 0, eligible: 1, matched: 1, daily_limit_exceeded: 2, rule_failed: 3, inactive: 4 };
+  const order = { chosen: 0, eligible: 1, matched: 1, over_norm: 2, daily_limit_exceeded: 3, rule_failed: 4, inactive: 5 };
   const sorted = [...(x.candidates || [])].sort((a, b) =>
     (order[a.verdict] ?? 9) - (order[b.verdict] ?? 9) || (a.score ?? 1e12) - (b.score ?? 1e12));
   for (const c of sorted) {
@@ -32,6 +35,7 @@ export function renderExplanation(x) {
   scroll.append(table);
   wrap.append(scroll);
   wrap.append(el('p', 'Оценка = (вес заявок в работе у сотрудника + вес этой заявки) / его квалификация — то есть нагрузка после назначения. Выбирается наименьшая; при равенстве — '
-    + 'меньше назначений за сутки на единицу квалификации, затем меньший номер сотрудника.', 'hint'));
+    + 'меньше назначений за сутки на единицу квалификации, затем меньший номер сотрудника. Кто уже набрал норму, получает заявку '
+    + 'сверх неё только в режиме «больше нормы» и только если у всех остальных норма набрана.', 'hint'));
   return wrap;
 }

@@ -13,6 +13,12 @@ public class Executor
     public int? DailyLimit { get; set; }
 
     public decimal QualificationWeight { get; set; } = 1m;
+
+    /// <summary>
+    /// Режим «готов взять больше нормы»: на сколько процентов сверх суточного лимита сотрудник готов работать.
+    /// 0 — режим выключен. Сверх нормы достаются только излишки — заявки, которые иначе ждали бы.
+    /// </summary>
+    public int ExtraPercent { get; set; }
     public string AttributesJson { get; set; } = "{}";
     public DateTimeOffset UpdatedAt { get; set; }
 }

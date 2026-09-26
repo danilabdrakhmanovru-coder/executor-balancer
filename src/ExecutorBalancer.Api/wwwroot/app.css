@@ -109,6 +109,7 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .svg-chart .line.series-c { stroke: var(--accent-3); } .svg-chart .point.series-c { fill: var(--accent-3); }
 .svg-chart .band { fill: rgba(var(--tblr-success-rgb), .1); }
 .svg-chart .zero { stroke: var(--muted); stroke-width: 1; }
+.svg-chart .threshold { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .svg-chart .dev-ok { fill: var(--ok); } .svg-chart .dev-warn { fill: var(--warn); } .svg-chart .dev-bad { fill: var(--bad); }
 .legend { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 8px; }
@@ -116,6 +117,9 @@ tr.fresh { animation: flash 1.2s ease-out; }
 
 /* формы */
 .form-grid { display: grid; gap: 12px; }
+.executor-quality { margin: 8px 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.today-cell { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.motivation-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 24px; }
 .field .form-hint { margin-top: 4px; }
 .sentence { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
 .value-editor { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

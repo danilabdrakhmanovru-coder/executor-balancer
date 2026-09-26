@@ -41,4 +41,16 @@ public class ExecutorHourStat
 
     /// <summary>Заявки, отправленные исполнителем на доработку.</summary>
     public int ReturnedCount { get; set; }
+
+    /// <summary>Вес закрытых заявок — максимум баллов, если бы всё было сделано качественно.</summary>
+    public decimal ClosedWeight { get; set; }
+
+    /// <summary>Баллы рейтинга: сумма «вес × коэффициент качества» по закрытым заявкам.</summary>
+    public decimal Points { get; set; }
+
+    /// <summary>Заявки, закрытые подозрительно быстро.</summary>
+    public int FastClosedCount { get; set; }
+
+    /// <summary>Назначения сверх нормы — в режиме «больше нормы».</summary>
+    public int ExtraCount { get; set; }
 }

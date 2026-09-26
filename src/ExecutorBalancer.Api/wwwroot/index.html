@@ -211,7 +211,7 @@
                   <div class="table-responsive scroll">
                     <table class="table card-table table-vcenter">
                       <thead>
-                        <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th>Сегодня / лимит</th><th title="Отклонение от справедливой доли за сегодня">Откл.</th></tr>
+                        <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th title="Назначено сегодня / суточный лимит (норма); ∞ — без лимита">Сегодня / норма</th><th title="Отклонение от справедливой доли за сегодня">Откл.</th></tr>
                       </thead>
                       <tbody id="executors"></tbody>
                     </table>
@@ -282,6 +282,34 @@
                 </div>
               </div>
             </div>
+            <div class="row row-cards">
+              <div class="col-xl-7">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#trophy"></use></svg>Рейтинг сотрудников</h3>
+                    <div class="card-actions text-secondary">балл = вес заявки × качество</div>
+                  </div>
+                  <div class="table-responsive scroll">
+                    <table class="table card-table table-vcenter">
+                      <thead>
+                        <tr><th>#</th><th>Сотрудник</th><th title="Сумма «вес × коэффициент качества» по закрытым заявкам">Баллы</th><th>Закрыто</th><th title="Баллы / максимально возможные баллы за те же заявки">Качество</th><th title="Закрыто подозрительно быстро">Быстрых</th><th title="Отправлено на доработку">Доработок</th><th title="Получено сверх нормы в режиме «больше нормы»">Сверх нормы</th></tr>
+                      </thead>
+                      <tbody id="an-rating"></tbody>
+                    </table>
+                  </div>
+                  <div class="card-footer text-secondary small" id="an-rating-hint"></div>
+                </div>
+              </div>
+              <div class="col-xl-5">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title">Количество против качества</h3>
+                    <div class="card-actions text-secondary">справа внизу — «работа на количество»</div>
+                  </div>
+                  <div class="card-body"><div id="an-scatter" class="chart"></div></div>
+                </div>
+              </div>
+            </div>
             <div class="card">
               <div class="card-header"><h3 class="card-title">По исполнителям</h3></div>
               <div class="table-responsive scroll">
@@ -298,6 +326,7 @@
           <!-- Настройки: подменю -->
           <div id="settings-nav" class="btn-group settings-nav hidden" role="group" aria-label="Раздел настроек">
             <button class="btn" data-tab="constructor" type="button"><svg class="icon"><use href="icons.svg#adjustments"></use></svg>Параметры и правила</button>
+            <button class="btn" data-tab="motivation" type="button"><svg class="icon"><use href="icons.svg#trophy"></use></svg>Рейтинг и сверхнорма</button>
             <button class="btn" data-tab="preview" type="button"><svg class="icon"><use href="icons.svg#zoom-check"></use></svg>Проверка заявки</button>
             <button class="btn" data-tab="departments" type="button"><svg class="icon"><use href="icons.svg#building"></use></svg>Отделы</button>
           </div>
@@ -405,6 +434,37 @@
                 </div>
               </div>
             </div>
+          </section>
+
+          <!-- Настройки → Рейтинг и сверхнорма -->
+          <section id="tab-motivation" class="tab-page hidden">
+            <div class="card intro">
+              <div class="card-body">
+                <div class="d-flex gap-3">
+                  <span class="avatar avatar-md bg-primary-lt"><svg class="icon"><use href="icons.svg#trophy"></use></svg></span>
+                  <div>
+                    <h3 class="card-title mb-2">Мотивация без погони за количеством</h3>
+                    <p class="mb-2"><strong>Рейтинг.</strong> За каждую закрытую заявку сотрудник получает балл = вес заявки ×
+                      коэффициент качества. Коэффициент снижается за каждую доработку и за подозрительно быстрое закрытие. Сложная
+                      и качественная работа ценится больше, чем много простых заявок «на скорую руку».</p>
+                    <p class="mb-2"><strong>«Готов взять больше нормы».</strong> Сотрудник с суточным лимитом (нормой) может взять
+                      до N% сверх неё — например, ради премии. Ему достаются только излишки: заявка уходит сверх нормы, лишь когда
+                      у всех подходящих коллег норма уже набрана. Ни у кого ничего не забирается.</p>
+                    <p class="text-secondary mb-0"><strong>Защита.</strong> Потолок режима задаётся здесь; при качестве ниже порога
+                      режим приостанавливается сам; сложные заявки сверх нормы — только при высоком подтверждённом качестве
+                      (не меньше пяти закрытых заявок за 7 дней). Настройки действуют для отдела, выбранного в шапке.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <form id="motivation-form" class="card">
+              <div class="card-header"><h3 class="card-title">Настройки отдела</h3></div>
+              <div class="card-body"><div id="motivation-fields" class="form-grid motivation-grid"></div></div>
+              <div class="card-footer d-flex align-items-center gap-3">
+                <button id="motivation-save" class="btn btn-primary" type="submit"><svg class="icon"><use href="icons.svg#check"></use></svg>Сохранить</button>
+                <span id="motivation-error" class="text-danger"></span>
+              </div>
+            </form>
           </section>
 
           <!-- Настройки → Отделы -->

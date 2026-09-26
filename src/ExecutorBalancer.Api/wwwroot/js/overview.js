@@ -24,6 +24,32 @@ function renderTiles(t, fairness) {
   $('tiles').replaceChildren(...tiles.map((args) => tile(...args)));
 }
 
+/**
+ * «Сегодня / норма»: ∞ — у сотрудника нет суточного лимита. В режиме «больше нормы» видно, сколько ещё можно
+ * сверх нормы, а если режим приостановлен защитой — почему.
+ */
+export function todayCell(e) {
+  const cell = el('span', null, 'today-cell');
+  if (e.dailyLimit == null) {
+    cell.append(el('span', `${e.assignedToday} / ∞`));
+    cell.title = 'Без суточного лимита — получает столько, сколько распределится поровну';
+    return cell;
+  }
+  const cap = e.extra?.extraLimit ?? e.dailyLimit;
+  const text = `${e.assignedToday} / ${e.dailyLimit}`;
+  cell.append(e.assignedToday >= cap ? badge(text, 'warn') : e.assignedToday >= e.dailyLimit ? badge(text, 'ok') : el('span', text));
+  if (e.extraPercent > 0 && e.extra?.extraLimit) {
+    const extra = badge(`+${e.extraPercent}% до ${e.extra.extraLimit}`, 'ok');
+    extra.title = 'Режим «больше нормы»: сверх нормы получает только излишки';
+    cell.append(' ', extra);
+  } else if (e.extraPercent > 0) {
+    const off = badge('режим на паузе', 'bad');
+    off.title = e.extra?.note || 'режим «больше нормы» не действует';
+    cell.append(' ', off);
+  }
+  return cell;
+}
+
 function renderExecutors(executors) {
   if (!executors.length) {
     $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС (на демонстрации — вкладка «Имитация АИС»)'));
@@ -39,9 +65,7 @@ function renderExecutors(executors) {
     bar.append(fill);
     const barCell = el('div');
     barCell.append(bar, el('small', fmt(e.relativeLoad), 'muted'));
-    const limit = e.dailyLimit == null ? '∞' : e.dailyLimit;
-    const limitCell = e.dailyLimit != null && e.assignedToday >= e.dailyLimit
-      ? badge(`${e.assignedToday} / ${limit}`, 'warn') : `${e.assignedToday} / ${limit}`;
+    const limitCell = todayCell(e);
     return row([name, fmt(e.qualificationWeight), e.openCount, fmt(e.openWeight), barCell, limitCell,
       deviation(e.deviationPercent)], e.isActive ? '' : 'inactive');
   }));
