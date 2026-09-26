@@ -11,6 +11,8 @@ public class ExecutorHourStat
 
     public long ExecutorId { get; set; }
 
+    public int DepartmentId { get; set; } = Department.DefaultId;
+
     /// <summary>Все назначения, включая заявки от родителя и вторичные.</summary>
     public int AssignedCount { get; set; }
 

@@ -45,11 +45,11 @@ public static class ExecutorStats
     ];
 
     private static readonly string Insert =
-        "INSERT INTO executor_hour_stats (\"BucketHour\", \"ExecutorId\", " +
+        "INSERT INTO executor_hour_stats (\"BucketHour\", \"ExecutorId\", \"DepartmentId\", " +
         string.Join(", ", Columns.Select(c => $"\"{c}\"")) + ")\nVALUES";
 
     private static readonly string OnConflict =
-        "\nON CONFLICT (\"BucketHour\", \"ExecutorId\") DO UPDATE SET\n    " +
+        "\nON CONFLICT (\"BucketHour\", \"ExecutorId\") DO UPDATE SET\n    \"DepartmentId\" = excluded.\"DepartmentId\",\n    " +
         string.Join(",\n    ", Columns.Select(c => $"\"{c}\" = executor_hour_stats.\"{c}\" + excluded.\"{c}\""));
 
     public static long HourOf(DateTimeOffset moment) =>
@@ -57,8 +57,8 @@ public static class ExecutorStats
 
     public static DateTimeOffset HourStart(long bucket) => DateTimeOffset.FromUnixTimeSeconds(bucket * 3600);
 
-    public static Task RecordAsync(IBalancerDbContext db, DateTimeOffset moment, IEnumerable<StatDelta> deltas,
-        CancellationToken cancellationToken)
+    public static Task RecordAsync(IBalancerDbContext db, DateTimeOffset moment, int departmentId,
+        IEnumerable<StatDelta> deltas, CancellationToken cancellationToken)
     {
         // в одной команде строка может встретиться только один раз
         var rows = deltas
@@ -73,11 +73,11 @@ public static class ExecutorStats
 
         var bucket = HourOf(moment);
         var sql = new StringBuilder(Insert);
-        var args = new List<object>(rows.Count * (Columns.Length + 2));
+        var args = new List<object>(rows.Count * (Columns.Length + 3));
         foreach (var row in rows)
         {
             sql.Append(args.Count == 0 ? "\n    (" : ",\n    (");
-            for (var i = 0; i < Columns.Length + 2; i++)
+            for (var i = 0; i < Columns.Length + 3; i++)
             {
                 sql.Append(CultureInfo.InvariantCulture, $"{(i == 0 ? "" : ", ")}{{{args.Count + i}}}");
             }
@@ -85,7 +85,7 @@ public static class ExecutorStats
             sql.Append(')');
             args.AddRange(
             [
-                bucket, row.ExecutorId, row.Assigned, row.AssignedWeight, row.Primary, row.Reassign, row.Parent,
+                bucket, row.ExecutorId, departmentId, row.Assigned, row.AssignedWeight, row.Primary, row.Reassign, row.Parent,
                 row.Secondary, row.FreeWeight, row.Closed, row.Returned,
             ]);
         }
@@ -98,7 +98,7 @@ public static class ExecutorStats
     /// Учитывает заявку свободного выбора в группе «кто мог её взять». Очень большие наборы
     /// (ключ длиннее MaxSetKeyLength) не пишутся — такие заявки просто не участвуют в эталоне.
     /// </summary>
-    public static Task RecordEligibilityAsync(IBalancerDbContext db, DateTimeOffset moment,
+    public static Task RecordEligibilityAsync(IBalancerDbContext db, DateTimeOffset moment, int departmentId,
         IEnumerable<long> eligible, decimal weight, CancellationToken cancellationToken)
     {
         var key = string.Join(',', eligible.Distinct().Order().Select(id => id.ToString(CultureInfo.InvariantCulture)));
@@ -109,13 +109,13 @@ public static class ExecutorStats
 
         return db.Database.ExecuteSqlRawAsync(
             """
-            INSERT INTO eligibility_hour_stats ("BucketHour", "SetKey", "Count", "Weight")
-            VALUES ({0}, {1}, 1, {2})
-            ON CONFLICT ("BucketHour", "SetKey") DO UPDATE SET
+            INSERT INTO eligibility_hour_stats ("DepartmentId", "BucketHour", "SetKey", "Count", "Weight")
+            VALUES ({3}, {0}, {1}, 1, {2})
+            ON CONFLICT ("DepartmentId", "BucketHour", "SetKey") DO UPDATE SET
                 "Count" = eligibility_hour_stats."Count" + 1,
                 "Weight" = eligibility_hour_stats."Weight" + excluded."Weight"
             """,
-            [HourOf(moment), key, weight],
+            [HourOf(moment), key, weight, departmentId],
             cancellationToken);
     }
 

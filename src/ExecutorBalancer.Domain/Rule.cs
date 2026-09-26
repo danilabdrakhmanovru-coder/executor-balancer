@@ -7,6 +7,8 @@ namespace ExecutorBalancer.Domain;
 public class Rule
 {
     public int Id { get; set; }
+
+    public int DepartmentId { get; set; } = Department.DefaultId;
     public string Name { get; set; } = "";
     public bool IsEnabled { get; set; } = true;
     public int Priority { get; set; }

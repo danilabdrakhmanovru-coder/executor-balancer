@@ -6,6 +6,7 @@ namespace ExecutorBalancer.Application;
 
 public interface IBalancerDbContext
 {
+    DbSet<Department> Departments { get; }
     DbSet<Order> Orders { get; }
     DbSet<Executor> Executors { get; }
     DbSet<Assignment> Assignments { get; }

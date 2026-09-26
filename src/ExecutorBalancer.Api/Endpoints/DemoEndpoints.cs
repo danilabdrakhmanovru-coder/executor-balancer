@@ -2,10 +2,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ExecutorBalancer.Api.Contracts;
 using ExecutorBalancer.Api.Security;
+using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Domain;
 using ExecutorBalancer.Infrastructure.Workers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace ExecutorBalancer.Api.Endpoints;
@@ -30,11 +32,13 @@ public sealed record DemoOrderRequest(long? ParentId, Dictionary<string, JsonEle
 /// Пульт демонстрации. Браузер обращается только к балансировщику, а тот — к эмулятору АИС со своим ключом:
 /// ключ АИС на страницу не попадает. Данные исполнителей и заявок проверяются по справочнику параметров
 /// до отправки в АИС — иначе АИС приняла бы то, что потом отклонит балансировщик.
+/// Всё — в рамках выбранного отдела: АИС получает его код и шлёт заявки и исполнителей в адрес отдела.
 /// </summary>
 public static class DemoEndpoints
 {
     public const int MaxSeedCount = 50;
     public const double MaxRatePerHour = 72_000;
+    private const long IdsPerDepartment = 1000;
 
     private static readonly int?[] DailyLimits = [null, null, 60, 80, 120, 200];
     private static readonly decimal[] Qualifications = [0.8m, 1m, 1m, 1.2m, 1.5m, 2m];
@@ -48,35 +52,41 @@ public static class DemoEndpoints
             .AddEndpointFilter(async (context, next) =>
                 context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled
                     ? await next(context)
-                    : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"));
+                    : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"))
+            .AddEndpointFilter(DepartmentScope.RequireDepartment);
 
-        group.MapGet("/status", async (IHttpClientFactory http, CancellationToken ct) =>
+        group.MapGet("/status", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http, CancellationToken ct) =>
         {
+            var code = await CodeAsync(db, d, ct);
             var client = http.CreateClient(AisOptions.HttpClientName);
-            var simulation = await Relay(client, HttpMethod.Get, "api/ais/simulation", null, ct);
+            var simulation = await Relay(client, HttpMethod.Get, $"api/ais/simulation?department={code}", null, ct);
             if (simulation.Error is not null)
             {
                 return simulation.Error;
             }
 
-            var stats = await Relay(client, HttpMethod.Get, "api/ais/stats", null, ct);
+            var stats = await Relay(client, HttpMethod.Get, $"api/ais/stats?department={code}", null, ct);
             return stats.Error ?? Results.Ok(new { Simulation = simulation.Body, Ais = stats.Body });
         });
 
-        group.MapGet("/executors", async (IHttpClientFactory http, CancellationToken ct) =>
-            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Get, "api/ais/executors", null, ct)).Result);
+        group.MapGet("/executors", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http, CancellationToken ct) =>
+            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Get,
+                $"api/ais/executors?department={await CodeAsync(db, d, ct)}", null, ct)).Result);
 
-        group.MapPost("/executors/seed", async (SeedRequest request, IHttpClientFactory http, ExecutorDirectory directory,
-            CancellationToken ct) =>
+        group.MapPost("/executors/seed", async (DepartmentScope d, SeedRequest request, IBalancerDbContext db,
+            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
             if (request.Count is < 1 or > MaxSeedCount)
             {
                 return Invalid("count", $"от 1 до {MaxSeedCount}");
             }
 
-            var snapshot = await directory.GetAsync(ct);
+            var snapshot = await directory.GetAsync(d.Id, ct);
             var body = new
             {
+                Department = await CodeAsync(db, d, ct),
+                // идентификаторы в АИС общие: у каждого отдела свой диапазон, у основного — 1, 2, 3…
+                FirstId = (d.Id - 1L) * IdsPerDepartment + 1,
                 request.Count,
                 Fields = Specs(snapshot, FieldOwner.Executor),
                 Names = DomainPresets.ExecutorNames,
@@ -86,8 +96,8 @@ public static class DemoEndpoints
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/executors/seed", body, ct)).Result;
         });
 
-        group.MapPut("/executors/{id:long}", async (long id, ExecutorRequest request, IHttpClientFactory http,
-            ExecutorDirectory directory, CancellationToken ct) =>
+        group.MapPut("/executors/{id:long}", async (DepartmentScope d, long id, ExecutorRequest request,
+            IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
             var errors = RequestValidation.Validate(request);
             if (id <= 0)
@@ -97,7 +107,7 @@ public static class DemoEndpoints
 
             if (errors.Count == 0 && request.Attributes is not null)
             {
-                (await directory.GetAsync(ct)).Catalog.Parse(FieldOwner.Executor, request.Attributes, errors);
+                (await directory.GetAsync(d.Id, ct)).Catalog.Parse(FieldOwner.Executor, request.Attributes, errors);
             }
 
             if (errors.Count > 0)
@@ -105,8 +115,17 @@ public static class DemoEndpoints
                 return Results.ValidationProblem(errors);
             }
 
+            var body = new
+            {
+                Department = await CodeAsync(db, d, ct),
+                FullName = request.FullName!.Trim(),
+                request.IsActive,
+                request.DailyLimit,
+                request.QualificationWeight,
+                request.Attributes,
+            };
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Put, $"api/ais/executors/{id}",
-                request with { FullName = request.FullName!.Trim() }, ct)).Result;
+                body, ct)).Result;
         });
 
         group.MapPost("/executors/{id:long}/active", async (long id, ActiveRequest request, IHttpClientFactory http,
@@ -114,24 +133,31 @@ public static class DemoEndpoints
             (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, $"api/ais/executors/{id}/active",
                 request, ct)).Result);
 
-        group.MapPost("/simulation/start", async (SimulationStartRequest request, IHttpClientFactory http,
-            ExecutorDirectory directory, CancellationToken ct) =>
+        group.MapPost("/simulation/start", async (DepartmentScope d, SimulationStartRequest request, IBalancerDbContext db,
+            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
             if (request.RatePerHour is < 1 or > MaxRatePerHour || double.IsNaN(request.RatePerHour))
             {
                 return Invalid("ratePerHour", $"от 1 до {MaxRatePerHour} заявок в час");
             }
 
-            var snapshot = await directory.GetAsync(ct);
-            var body = new { request.RatePerHour, OrderFields = Specs(snapshot, FieldOwner.Order) };
+            var snapshot = await directory.GetAsync(d.Id, ct);
+            var body = new
+            {
+                Department = await CodeAsync(db, d, ct),
+                request.RatePerHour,
+                OrderFields = Specs(snapshot, FieldOwner.Order),
+            };
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/start", body, ct)).Result;
         });
 
-        group.MapPost("/simulation/stop", async (IHttpClientFactory http, CancellationToken ct) =>
-            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/stop", new { }, ct)).Result);
-
-        group.MapPost("/orders", async (DemoOrderRequest request, IHttpClientFactory http, ExecutorDirectory directory,
+        group.MapPost("/simulation/stop", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http,
             CancellationToken ct) =>
+            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post,
+                $"api/ais/simulation/stop?department={await CodeAsync(db, d, ct)}", new { }, ct)).Result);
+
+        group.MapPost("/orders", async (DepartmentScope d, DemoOrderRequest request, IBalancerDbContext db,
+            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
             var errors = new Dictionary<string, string[]>();
             if (request.ParentId is <= 0)
@@ -142,7 +168,7 @@ public static class DemoEndpoints
             RequestValidation.ValidateAttributes(request.Attributes, errors);
             if (errors.Count == 0 && request.Attributes is not null)
             {
-                (await directory.GetAsync(ct)).Catalog.Parse(FieldOwner.Order, request.Attributes, errors);
+                (await directory.GetAsync(d.Id, ct)).Catalog.Parse(FieldOwner.Order, request.Attributes, errors);
             }
 
             if (errors.Count > 0)
@@ -151,7 +177,8 @@ public static class DemoEndpoints
             }
 
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/orders",
-                new { request.ParentId, Attributes = request.Attributes ?? new() }, ct)).Result;
+                new { Department = await CodeAsync(db, d, ct), request.ParentId, Attributes = request.Attributes ?? new() },
+                ct)).Result;
         });
 
         return app;
@@ -229,6 +256,10 @@ public static class DemoEndpoints
                 detail: "Проверьте, что эмулятор АИС запущен"));
         }
     }
+
+    /// <summary>Код отдела для АИС. Формат кода проверен при создании отдела — в адрес запроса он попадает как есть.</summary>
+    private static Task<string> CodeAsync(IBalancerDbContext db, DepartmentScope d, CancellationToken ct) =>
+        db.Departments.AsNoTracking().Where(x => x.Id == d.Id).Select(x => x.Code).FirstAsync(ct);
 
     private static IResult Invalid(string field, string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [message] });

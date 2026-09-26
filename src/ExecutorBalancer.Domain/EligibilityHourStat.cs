@@ -9,6 +9,8 @@ public class EligibilityHourStat
 {
     public const int MaxSetKeyLength = 4000;
 
+    public int DepartmentId { get; set; } = Department.DefaultId;
+
     /// <summary>Номер часа: unix-время начала часа (UTC), делённое на 3600.</summary>
     public long BucketHour { get; set; }
 

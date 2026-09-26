@@ -1,15 +1,13 @@
-// Демонстрация: пошаговый пульт (сфера → исполнители → поток заявок → заявка вручную)
-// и живая схема пути заявки. Управляет эмулятором АИС через балансировщик.
+// Имитация АИС: пошаговый пульт для выбранного отдела (сотрудники → поток заявок → заявка вручную)
+// и живая схема пути заявки. Управляет эмулятором АИС через балансировщик; у каждого отдела свой поток.
 import { api, problemText } from './api.js';
 import { $, el, input, field, toast, fmt, badge, icon } from './dom.js';
-import { renderPresets } from './presets.js';
 import { attributeForm } from './forms.js';
 import { renderExplanation, KIND } from './explain.js';
 import { openOrder } from './overview.js';
 
 let config = null;
 let orderForm = null;
-let loadPresets = () => Promise.resolve();
 let lastRunning = null;
 
 // ---------- схема пути заявки ----------
@@ -85,11 +83,8 @@ export async function refreshDemo() {
   renderSimulation(status?.simulation);
   renderFeed(feed);
   $('demo-executors-count').textContent = summary.totals.activeExecutors
-    ? `Сейчас активных исполнителей: ${summary.totals.activeExecutors}.` : 'Исполнителей пока нет.';
-  if (!config) {
-    await reloadConfig();
-    await loadPresets();
-  }
+    ? `Сейчас на работе в отделе: ${summary.totals.activeExecutors}.` : 'В отделе пока нет сотрудников.';
+  if (!config) await reloadConfig();
 }
 
 // ---------- шаги ----------
@@ -127,7 +122,7 @@ async function sendOrder() {
         return;
       }
     }
-    result.replaceChildren(el('p', `Заявка #${order.id} ещё в пути — посмотрите её на вкладке «Обзор».`, 'muted'));
+    result.replaceChildren(el('p', `Заявка #${order.id} ещё в пути — посмотрите её на вкладке «Мониторинг».`, 'muted'));
   } catch (e) {
     result.replaceChildren(el('p', e instanceof Error && !('status' in e) ? e.message : problemText(e), 'error'));
   } finally {
@@ -135,19 +130,13 @@ async function sendOrder() {
   }
 }
 
-export function initDemo(onConfigChanged) {
-  const presetsBox = $('demo-presets');
-  loadPresets = () => renderPresets(presetsBox, async () => {
-    await reloadConfig();
-    onConfigChanged?.();
-  }).catch((e) => { presetsBox.textContent = problemText(e); });
-
+export function initDemo() {
   const count = input('number', '15', { min: '1', max: '50', step: '1' });
   $('demo-seed-count').replaceChildren(field('Сколько исполнителей', count));
   $('demo-seed').addEventListener('click', async () => {
     try {
       const created = await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: Number(count.value) || 15 } });
-      toast(`В АИС заведено исполнителей: ${created.length}. Навыки и лимиты — случайные в рамках шаблона.`);
+      toast(`В АИС заведено сотрудников отдела: ${created.length}. Навыки и лимиты — случайные по параметрам отдела.`);
       await refreshDemo();
     } catch (e) { toast(problemText(e), 'bad'); }
   });
@@ -159,14 +148,14 @@ export function initDemo(onConfigChanged) {
   $('demo-start').addEventListener('click', async () => {
     try {
       await api('/api/admin/demo/simulation/start', { method: 'POST', body: { ratePerHour: Number(rate.value) } });
-      toast('Поток заявок запущен');
+      toast('Поток заявок отдела запущен');
       await refreshDemo();
     } catch (e) { toast(problemText(e), 'bad'); }
   });
   $('demo-stop').addEventListener('click', async () => {
     try {
       await api('/api/admin/demo/simulation/stop', { method: 'POST' });
-      toast('Поток остановлен');
+      toast('Поток заявок отдела остановлен');
       await refreshDemo();
     } catch (e) { toast(problemText(e), 'bad'); }
   });
@@ -175,5 +164,8 @@ export function initDemo(onConfigChanged) {
   $('demo-order-form').addEventListener('submit', (event) => { event.preventDefault(); sendOrder(); });
 }
 
-/** После смены правил в конструкторе форма ручной заявки строится заново. */
-export function invalidateDemoConfig() { config = null; }
+/** После смены правил или отдела форма ручной заявки строится заново. */
+export function invalidateDemoConfig() {
+  config = null;
+  $('demo-order-result').replaceChildren(el('p', 'Решение по заявке появится здесь.', 'muted'));
+}

@@ -71,10 +71,17 @@ internal sealed class BalancerFixture : IAsyncDisposable
         return await action(scope.ServiceProvider.GetRequiredService<ConfigurationService>());
     }
 
-    public async Task<AnalyticsReport> Analytics(AnalyticsPeriod period = AnalyticsPeriod.Today)
+    public async Task<T> Departments<T>(Func<DepartmentService, Task<T>> action)
     {
         await using var scope = _services.CreateAsyncScope();
-        return await scope.ServiceProvider.GetRequiredService<AnalyticsService>().BuildAsync(period, CancellationToken.None);
+        return await action(scope.ServiceProvider.GetRequiredService<DepartmentService>());
+    }
+
+    public async Task<AnalyticsReport> Analytics(AnalyticsPeriod period = AnalyticsPeriod.Today, int department = D)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<AnalyticsService>()
+            .BuildAsync(department, period, CancellationToken.None);
     }
 
     public async Task<T> Query<T>(Func<IBalancerDbContext, Task<T>> action)
@@ -84,7 +91,7 @@ internal sealed class BalancerFixture : IAsyncDisposable
     }
 
     public Task<BalanceResult> Receive(long id, long? parentId = null, object? attributes = null) =>
-        Run(b => b.ReceiveAsync(new IncomingOrder(id, parentId, OrderStatus.Processed,
+        Run(b => b.ReceiveAsync(D, new IncomingOrder(id, parentId, OrderStatus.Processed,
             Attributes(attributes ?? DefaultOrder())), CancellationToken.None));
 
     public Task<BalanceResult?> ChangeStatus(long id, OrderStatus status) =>
@@ -94,7 +101,7 @@ internal sealed class BalancerFixture : IAsyncDisposable
         string[]? subjects = null, object? extra = null) =>
         Run(async b =>
         {
-            await b.UpsertExecutorAsync(new IncomingExecutor(id, $"Исполнитель {id}", active, dailyLimit, qualification,
+            await b.UpsertExecutorAsync(D, new IncomingExecutor(id, $"Исполнитель {id}", active, dailyLimit, qualification,
                 Merge(Attributes(new
                 {
                     min_sum = 0,

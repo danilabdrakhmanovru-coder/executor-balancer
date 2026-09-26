@@ -1,5 +1,5 @@
 // Аналитика: периоды, динамика, справедливость по исполнителям, типы назначений, выгрузка.
-import { api } from './api.js';
+import { api, scoped } from './api.js';
 import { $, el, row, fmt, deviation, emptyRow, tile } from './dom.js';
 import { lines, diverging, columns } from './charts.js';
 
@@ -78,7 +78,12 @@ function select(value) {
   period = PERIODS.includes(value) ? value : 'today';
   remember(period);
   for (const b of $('period').querySelectorAll('button')) b.classList.toggle('active', b.dataset.period === period);
-  $('export').href = `/api/dashboard/export.csv?period=${encodeURIComponent(period)}`;
+  exportLink();
+}
+
+/** Ссылка выгрузки — за выбранный период и по текущему отделу. */
+export function exportLink() {
+  $('export').href = scoped(`/api/dashboard/export.csv?period=${encodeURIComponent(period)}`);
 }
 
 export function initAnalytics(onChange) {

@@ -26,7 +26,7 @@ function renderTiles(t, fairness) {
 
 function renderExecutors(executors) {
   if (!executors.length) {
-    $('executors').replaceChildren(emptyRow(7, 'Исполнителей пока нет — их передаёт АИС (или python tools/loadgen.py --setup)'));
+    $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС (на демонстрации — вкладка «Имитация АИС»)'));
     return;
   }
   const max = Math.max(1, ...executors.filter((e) => e.isActive).map((e) => e.relativeLoad));
@@ -108,8 +108,14 @@ export async function openOrder(id) {
       body.append(el('p', `История назначений: ${order.history.map((h) => `${KIND[h.kind] || h.kind} → ${h.executorId}`).join(' · ')}`, 'muted'));
     }
   } catch (e) {
-    body.replaceChildren(el('p', e.status === 404 ? 'Заявка не найдена.' : 'Ошибка загрузки.', 'error'));
+    body.replaceChildren(el('p', e.status === 404 ? 'В этом отделе такой заявки нет.' : 'Ошибка загрузки.', 'error'));
   }
+}
+
+/** Другой отдел — своя лента и свой график: подсветка «новых» и кэш графика сбрасываются. */
+export function resetOverview() {
+  lastFeedId = 0;
+  liveLoadedAt = 0;
 }
 
 export function initOverview() {

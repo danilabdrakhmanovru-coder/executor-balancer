@@ -8,7 +8,7 @@ public class AisEmulatorTests
     public void OlderAssignmentDoesNotOverwriteNewer()
     {
         var store = new AisStore();
-        var order = store.CreateOrder(null, new());
+        var order = store.CreateOrder(null, null, new());
 
         // назначения приходят с разной задержкой: сначала новое, потом старое
         Assert.True(store.ApplyAssignment(order.Id, executorId: 2, sequence: 10));

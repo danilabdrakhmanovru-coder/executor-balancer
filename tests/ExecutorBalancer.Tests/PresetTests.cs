@@ -20,7 +20,7 @@ public class PresetTests : IAsyncLifetime
     [MemberData(nameof(PresetIds))]
     public void EveryPresetRuleCompiles(string id)
     {
-        var (fields, rules, weightRules) = DomainPresets.Build(DomainPresets.Find(id)!, DateTimeOffset.UtcNow);
+        var (fields, rules, weightRules) = DomainPresets.Build(DomainPresets.Find(id)!, DateTimeOffset.UtcNow, D);
         var catalog = new FieldCatalog(fields);
 
         Assert.All(rules, r => RuleCompiler.Compile(r, catalog));
@@ -38,7 +38,7 @@ public class PresetTests : IAsyncLifetime
     [Fact]
     public async Task BankIsTheStartingConfiguration()
     {
-        var presets = await _f.Config(c => c.GetPresetsAsync(CancellationToken.None));
+        var presets = await _f.Config(c => c.GetPresetsAsync(D, CancellationToken.None));
         Assert.Equal("bank", Assert.Single(presets, p => p.IsCurrent).Id);
     }
 
@@ -47,15 +47,15 @@ public class PresetTests : IAsyncLifetime
     {
         await _f.Config(async c =>
         {
-            await c.ApplyPresetAsync("logistics", CancellationToken.None);
+            await c.ApplyPresetAsync(D, "logistics", CancellationToken.None);
             return true;
         });
 
-        var view = await _f.Config(c => c.GetAsync(CancellationToken.None));
+        var view = await _f.Config(c => c.GetAsync(D, CancellationToken.None));
         Assert.Contains(view.Fields, f => f.Key == "cargo_weight");
         Assert.DoesNotContain(view.Fields, f => f.Key == "sum");
         Assert.All(view.Rules, r => Assert.Null(r.Error));
-        var audit = await _f.Config(c => c.GetAuditAsync(null, 1, CancellationToken.None));
+        var audit = await _f.Config(c => c.GetAuditAsync(D, null, 1, CancellationToken.None));
         Assert.Equal("preset_applied", audit[0].Action);
         Assert.Equal("logistics", audit[0].EntityId);
     }
@@ -65,7 +65,7 @@ public class PresetTests : IAsyncLifetime
     {
         await _f.Config(async c =>
         {
-            await c.ApplyPresetAsync("logistics", CancellationToken.None);
+            await c.ApplyPresetAsync(D, "logistics", CancellationToken.None);
             return true;
         });
         await _f.AddExecutor(1, extra: new { regions = new[] { "Уфа" }, max_cargo_weight = 300, cargo_types = new[] { "обычный" } });
@@ -85,7 +85,7 @@ public class PresetTests : IAsyncLifetime
     {
         await Assert.ThrowsAsync<InvalidInputException>(() => _f.Config(async c =>
         {
-            await c.ApplyPresetAsync("../etc", CancellationToken.None);
+            await c.ApplyPresetAsync(D, "../etc", CancellationToken.None);
             return true;
         }));
     }

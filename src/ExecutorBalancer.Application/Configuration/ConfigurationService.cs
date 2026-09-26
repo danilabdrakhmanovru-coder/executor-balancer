@@ -42,15 +42,18 @@ public sealed class ConfigurationService(
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public async Task<ConfigurationView> GetAsync(CancellationToken cancellationToken)
+    public async Task<ConfigurationView> GetAsync(int departmentId, CancellationToken cancellationToken)
     {
         var fields = await db.FieldDefinitions.AsNoTracking()
+            .Where(f => f.DepartmentId == departmentId)
             .OrderBy(f => f.Owner).ThenBy(f => f.Id)
             .ToListAsync(cancellationToken);
         var rules = await db.Rules.AsNoTracking()
+            .Where(r => r.DepartmentId == departmentId)
             .OrderBy(r => r.Priority).ThenBy(r => r.Id)
             .ToListAsync(cancellationToken);
         var weightRules = await db.WeightRules.AsNoTracking()
+            .Where(r => r.DepartmentId == departmentId)
             .OrderBy(r => r.Priority).ThenBy(r => r.Id)
             .ToListAsync(cancellationToken);
         var catalog = new FieldCatalog(fields);
@@ -65,9 +68,11 @@ public sealed class ConfigurationService(
     }
 
     /// <summary>Журнал: изменения конфигурации и входы администратора, новые сверху.</summary>
-    public async Task<IReadOnlyList<AuditView>> GetAuditAsync(long? beforeId, int limit, CancellationToken cancellationToken)
+    /// <remarks>Изменения этого отдела и общие события (входы, создание и удаление отделов).</remarks>
+    public async Task<IReadOnlyList<AuditView>> GetAuditAsync(int departmentId, long? beforeId, int limit,
+        CancellationToken cancellationToken)
     {
-        var query = db.AuditEntries.AsNoTracking();
+        var query = db.AuditEntries.AsNoTracking().Where(a => a.DepartmentId == departmentId || a.DepartmentId == null);
         if (beforeId is { } before)
         {
             query = query.Where(a => a.Id < before);
@@ -81,10 +86,10 @@ public sealed class ConfigurationService(
     // ---------- шаблоны сфер ----------
 
     /// <summary>Шаблоны и признак «сейчас применён»: все параметры шаблона есть в справочнике.</summary>
-    public async Task<IReadOnlyList<PresetView>> GetPresetsAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<PresetView>> GetPresetsAsync(int departmentId, CancellationToken cancellationToken)
     {
         // «применён» — все параметры шаблона есть с тем же типом и справочником
-        var current = (await db.FieldDefinitions.AsNoTracking().ToListAsync(cancellationToken))
+        var current = (await db.FieldDefinitions.AsNoTracking().Where(f => f.DepartmentId == departmentId).ToListAsync(cancellationToken))
             .ToDictionary(f => (f.Owner, f.Key));
         bool Same(PresetField f) => current.TryGetValue((f.Owner, f.Key), out var existing)
                                     && existing.Type == f.Type && existing.Options.SequenceEqual(f.Options);
@@ -101,25 +106,30 @@ public sealed class ConfigurationService(
     /// Заявки и исполнители не трогаются: их параметры хранятся целиком и начнут учитываться, когда появятся
     /// соответствующие поля.
     /// </summary>
-    public async Task ApplyPresetAsync(string id, CancellationToken cancellationToken)
+    public async Task ApplyPresetAsync(int departmentId, string id, CancellationToken cancellationToken)
     {
         var preset = DomainPresets.Find(id)
                      ?? throw new InvalidInputException(new Dictionary<string, string[]> { ["preset"] = ["неизвестный шаблон"] });
 
-        var previous = (await GetPresetsAsync(cancellationToken)).FirstOrDefault(p => p.IsCurrent);
+        var department = await db.Departments.FirstOrDefaultAsync(d => d.Id == departmentId, cancellationToken)
+                         ?? throw new InvalidInputException(new Dictionary<string, string[]> { ["department"] = ["отдел не найден"] });
+        var previous = (await GetPresetsAsync(departmentId, cancellationToken)).FirstOrDefault(p => p.IsCurrent);
         var before = new
         {
             Preset = previous?.Title,
-            Fields = await db.FieldDefinitions.AsNoTracking().OrderBy(f => f.Id).Select(f => f.Label).ToListAsync(cancellationToken),
-            Rules = await db.Rules.AsNoTracking().OrderBy(r => r.Id).Select(r => r.Name).ToListAsync(cancellationToken),
+            Fields = await db.FieldDefinitions.AsNoTracking().Where(f => f.DepartmentId == departmentId)
+                .OrderBy(f => f.Id).Select(f => f.Label).ToListAsync(cancellationToken),
+            Rules = await db.Rules.AsNoTracking().Where(r => r.DepartmentId == departmentId)
+                .OrderBy(r => r.Id).Select(r => r.Name).ToListAsync(cancellationToken),
         };
-        var (fields, rules, weightRules) = DomainPresets.Build(preset, clock.GetUtcNow());
+        var (fields, rules, weightRules) = DomainPresets.Build(preset, clock.GetUtcNow(), departmentId);
 
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
-            db.Rules.RemoveRange(await db.Rules.ToListAsync(cancellationToken));
-            db.WeightRules.RemoveRange(await db.WeightRules.ToListAsync(cancellationToken));
-            db.FieldDefinitions.RemoveRange(await db.FieldDefinitions.ToListAsync(cancellationToken));
+            db.Rules.RemoveRange(await db.Rules.Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken));
+            db.WeightRules.RemoveRange(await db.WeightRules.Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken));
+            db.FieldDefinitions.RemoveRange(await db.FieldDefinitions.Where(f => f.DepartmentId == departmentId).ToListAsync(cancellationToken));
+            department.PresetId = preset.Id;
             await db.SaveChangesAsync(cancellationToken);
 
             db.FieldDefinitions.AddRange(fields);
@@ -127,6 +137,7 @@ public sealed class ConfigurationService(
             db.WeightRules.AddRange(weightRules);
             db.AuditEntries.Add(new AuditEntry
             {
+                DepartmentId = departmentId,
                 Actor = Actor,
                 Action = "preset_applied",
                 Entity = "preset",
@@ -149,7 +160,7 @@ public sealed class ConfigurationService(
 
     // ---------- параметры ----------
 
-    public async Task<FieldView> CreateFieldAsync(FieldInput input, CancellationToken cancellationToken)
+    public async Task<FieldView> CreateFieldAsync(int departmentId, FieldInput input, CancellationToken cancellationToken)
     {
         var errors = new Dictionary<string, string[]>();
         var owner = input.Owner is { } o && Enum.IsDefined(o) ? o : Fail<FieldOwner>(errors, "owner", "Order или Executor");
@@ -164,25 +175,29 @@ public sealed class ConfigurationService(
         var fieldOptions = NormalizeOptions(type, input.Options, errors);
         ThrowIfAny(errors);
 
-        if (await db.FieldDefinitions.CountAsync(f => f.Owner == owner, cancellationToken) >= MaxFieldsPerOwner)
+        if (await db.FieldDefinitions.CountAsync(f => f.DepartmentId == departmentId && f.Owner == owner, cancellationToken) >= MaxFieldsPerOwner)
         {
             throw new ConfigurationConflictException($"не больше {MaxFieldsPerOwner} параметров у {OwnerText(owner)}");
         }
 
-        if (await db.FieldDefinitions.AnyAsync(f => f.Owner == owner && f.Key == key, cancellationToken))
+        if (await db.FieldDefinitions.AnyAsync(f => f.DepartmentId == departmentId && f.Owner == owner && f.Key == key, cancellationToken))
         {
             throw new ConfigurationConflictException($"у {OwnerText(owner)} уже есть параметр «{key}»");
         }
 
-        var field = new FieldDefinition { Owner = owner, Key = key, Label = label, Type = type, Options = fieldOptions };
+        var field = new FieldDefinition
+        {
+            DepartmentId = departmentId, Owner = owner, Key = key, Label = label, Type = type, Options = fieldOptions,
+        };
         db.FieldDefinitions.Add(field);
-        await SaveWithAuditAsync("field_created", "field", () => field.Id, null, Snapshot(field), cancellationToken);
+        await SaveWithAuditAsync(departmentId, "field_created", "field", () => field.Id, null, Snapshot(field), cancellationToken);
         return ToView(field, [], []);
     }
 
-    public async Task<FieldView?> UpdateFieldAsync(int id, FieldInput input, CancellationToken cancellationToken)
+    public async Task<FieldView?> UpdateFieldAsync(int departmentId, int id, FieldInput input,
+        CancellationToken cancellationToken)
     {
-        var field = await db.FieldDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+        var field = await db.FieldDefinitions.FirstOrDefaultAsync(f => f.Id == id && f.DepartmentId == departmentId, cancellationToken);
         if (field is null)
         {
             return null;
@@ -212,7 +227,7 @@ public sealed class ConfigurationService(
         var before = Snapshot(field);
         var replacement = new FieldDefinition
         {
-            Id = field.Id, Owner = field.Owner, Key = field.Key, Label = label, Type = field.Type, Options = fieldOptions,
+            Id = field.Id, DepartmentId = field.DepartmentId, Owner = field.Owner, Key = field.Key, Label = label, Type = field.Type, Options = fieldOptions,
         };
         await EnsureRulesSurviveAsync(field, replacement, cancellationToken);
         if (field.Owner == FieldOwner.Executor)
@@ -222,16 +237,16 @@ public sealed class ConfigurationService(
 
         field.Label = label;
         field.Options = fieldOptions;
-        await SaveWithAuditAsync("field_updated", "field", () => field.Id, before, Snapshot(field), cancellationToken);
+        await SaveWithAuditAsync(departmentId, "field_updated", "field", () => field.Id, before, Snapshot(field), cancellationToken);
 
-        var rules = await db.Rules.AsNoTracking().ToListAsync(cancellationToken);
-        var weightRules = await db.WeightRules.AsNoTracking().ToListAsync(cancellationToken);
+        var rules = await db.Rules.AsNoTracking().Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken);
+        var weightRules = await db.WeightRules.AsNoTracking().Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken);
         return ToView(field, rules, weightRules);
     }
 
-    public async Task<bool> DeleteFieldAsync(int id, CancellationToken cancellationToken)
+    public async Task<bool> DeleteFieldAsync(int departmentId, int id, CancellationToken cancellationToken)
     {
-        var field = await db.FieldDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+        var field = await db.FieldDefinitions.FirstOrDefaultAsync(f => f.Id == id && f.DepartmentId == departmentId, cancellationToken);
         if (field is null)
         {
             return false;
@@ -240,29 +255,30 @@ public sealed class ConfigurationService(
         await EnsureRulesSurviveAsync(field, replacement: null, cancellationToken);
         var before = Snapshot(field);
         db.FieldDefinitions.Remove(field);
-        await SaveWithAuditAsync("field_deleted", "field", () => id, before, null, cancellationToken);
+        await SaveWithAuditAsync(departmentId, "field_deleted", "field", () => id, before, null, cancellationToken);
         return true;
     }
 
     // ---------- правила подбора ----------
 
-    public async Task<RuleView> CreateRuleAsync(RuleInput input, CancellationToken cancellationToken)
+    public async Task<RuleView> CreateRuleAsync(int departmentId, RuleInput input, CancellationToken cancellationToken)
     {
-        if (await db.Rules.CountAsync(cancellationToken) >= MaxRules)
+        if (await db.Rules.CountAsync(r => r.DepartmentId == departmentId, cancellationToken) >= MaxRules)
         {
             throw new ConfigurationConflictException($"не больше {MaxRules} правил");
         }
 
-        var rule = new Rule();
+        var rule = new Rule { DepartmentId = departmentId };
         var catalog = await FillAsync(rule, input, cancellationToken);
         db.Rules.Add(rule);
-        await SaveWithAuditAsync("rule_created", "rule", () => rule.Id, null, Snapshot(rule), cancellationToken);
+        await SaveWithAuditAsync(departmentId, "rule_created", "rule", () => rule.Id, null, Snapshot(rule), cancellationToken);
         return ToView(rule, catalog);
     }
 
-    public async Task<RuleView?> UpdateRuleAsync(int id, RuleInput input, CancellationToken cancellationToken)
+    public async Task<RuleView?> UpdateRuleAsync(int departmentId, int id, RuleInput input,
+        CancellationToken cancellationToken)
     {
-        var rule = await db.Rules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var rule = await db.Rules.FirstOrDefaultAsync(r => r.Id == id && r.DepartmentId == departmentId, cancellationToken);
         if (rule is null)
         {
             return null;
@@ -270,13 +286,13 @@ public sealed class ConfigurationService(
 
         var before = Snapshot(rule);
         var catalog = await FillAsync(rule, input, cancellationToken);
-        await SaveWithAuditAsync("rule_updated", "rule", () => rule.Id, before, Snapshot(rule), cancellationToken);
+        await SaveWithAuditAsync(departmentId, "rule_updated", "rule", () => rule.Id, before, Snapshot(rule), cancellationToken);
         return ToView(rule, catalog);
     }
 
-    public async Task<bool> DeleteRuleAsync(int id, CancellationToken cancellationToken)
+    public async Task<bool> DeleteRuleAsync(int departmentId, int id, CancellationToken cancellationToken)
     {
-        var rule = await db.Rules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var rule = await db.Rules.FirstOrDefaultAsync(r => r.Id == id && r.DepartmentId == departmentId, cancellationToken);
         if (rule is null)
         {
             return false;
@@ -284,31 +300,32 @@ public sealed class ConfigurationService(
 
         var before = Snapshot(rule);
         db.Rules.Remove(rule);
-        await SaveWithAuditAsync("rule_deleted", "rule", () => id, before, null, cancellationToken);
+        await SaveWithAuditAsync(departmentId, "rule_deleted", "rule", () => id, before, null, cancellationToken);
         return true;
     }
 
     // ---------- правила веса ----------
 
-    public async Task<WeightRuleView> CreateWeightRuleAsync(WeightRuleInput input, CancellationToken cancellationToken)
+    public async Task<WeightRuleView> CreateWeightRuleAsync(int departmentId, WeightRuleInput input,
+        CancellationToken cancellationToken)
     {
-        if (await db.WeightRules.CountAsync(cancellationToken) >= MaxWeightRules)
+        if (await db.WeightRules.CountAsync(r => r.DepartmentId == departmentId, cancellationToken) >= MaxWeightRules)
         {
             throw new ConfigurationConflictException($"не больше {MaxWeightRules} правил веса");
         }
 
-        var rule = new WeightRule();
+        var rule = new WeightRule { DepartmentId = departmentId };
         var catalog = await FillAsync(rule, input, cancellationToken);
         db.WeightRules.Add(rule);
-        await SaveWithAuditAsync("weight_rule_created", "weight_rule", () => rule.Id, null, Snapshot(rule),
+        await SaveWithAuditAsync(departmentId, "weight_rule_created", "weight_rule", () => rule.Id, null, Snapshot(rule),
             cancellationToken);
         return ToView(rule, catalog);
     }
 
-    public async Task<WeightRuleView?> UpdateWeightRuleAsync(int id, WeightRuleInput input,
+    public async Task<WeightRuleView?> UpdateWeightRuleAsync(int departmentId, int id, WeightRuleInput input,
         CancellationToken cancellationToken)
     {
-        var rule = await db.WeightRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var rule = await db.WeightRules.FirstOrDefaultAsync(r => r.Id == id && r.DepartmentId == departmentId, cancellationToken);
         if (rule is null)
         {
             return null;
@@ -316,14 +333,14 @@ public sealed class ConfigurationService(
 
         var before = Snapshot(rule);
         var catalog = await FillAsync(rule, input, cancellationToken);
-        await SaveWithAuditAsync("weight_rule_updated", "weight_rule", () => rule.Id, before, Snapshot(rule),
+        await SaveWithAuditAsync(departmentId, "weight_rule_updated", "weight_rule", () => rule.Id, before, Snapshot(rule),
             cancellationToken);
         return ToView(rule, catalog);
     }
 
-    public async Task<bool> DeleteWeightRuleAsync(int id, CancellationToken cancellationToken)
+    public async Task<bool> DeleteWeightRuleAsync(int departmentId, int id, CancellationToken cancellationToken)
     {
-        var rule = await db.WeightRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var rule = await db.WeightRules.FirstOrDefaultAsync(r => r.Id == id && r.DepartmentId == departmentId, cancellationToken);
         if (rule is null)
         {
             return false;
@@ -331,7 +348,7 @@ public sealed class ConfigurationService(
 
         var before = Snapshot(rule);
         db.WeightRules.Remove(rule);
-        await SaveWithAuditAsync("weight_rule_deleted", "weight_rule", () => id, before, null, cancellationToken);
+        await SaveWithAuditAsync(departmentId, "weight_rule_deleted", "weight_rule", () => id, before, null, cancellationToken);
         return true;
     }
 
@@ -380,7 +397,7 @@ public sealed class ConfigurationService(
         rule.IsStrict = input.IsStrict;
         rule.UpdatedAt = clock.GetUtcNow();
 
-        var catalog = await CatalogAsync(cancellationToken);
+        var catalog = await CatalogAsync(rule.DepartmentId, cancellationToken);
         Compile(() => RuleCompiler.Compile(rule, catalog));
         return catalog;
     }
@@ -406,7 +423,7 @@ public sealed class ConfigurationService(
         rule.ValueJson = valueJson!;
         rule.Weight = input.Weight;
 
-        var catalog = await CatalogAsync(cancellationToken);
+        var catalog = await CatalogAsync(rule.DepartmentId, cancellationToken);
         Compile(() => RuleCompiler.CompileWeight(rule, catalog));
         return catalog;
     }
@@ -415,14 +432,15 @@ public sealed class ConfigurationService(
     private async Task EnsureRulesSurviveAsync(FieldDefinition current, FieldDefinition? replacement,
         CancellationToken cancellationToken)
     {
-        var fields = await db.FieldDefinitions.AsNoTracking().ToListAsync(cancellationToken);
+        var departmentId = current.DepartmentId;
+        var fields = await db.FieldDefinitions.AsNoTracking().Where(f => f.DepartmentId == departmentId).ToListAsync(cancellationToken);
         var before = new FieldCatalog(fields);
         var after = new FieldCatalog(replacement is null
             ? fields.Where(f => f.Id != current.Id)
             : fields.Where(f => f.Id != current.Id).Append(replacement));
 
         var broken = new List<string>();
-        foreach (var rule in await db.Rules.AsNoTracking().OrderBy(r => r.Id).ToListAsync(cancellationToken))
+        foreach (var rule in await db.Rules.AsNoTracking().Where(r => r.DepartmentId == departmentId).OrderBy(r => r.Id).ToListAsync(cancellationToken))
         {
             if (Error(() => RuleCompiler.Compile(rule, before)) is null
                 && Error(() => RuleCompiler.Compile(rule, after)) is { } reason)
@@ -431,7 +449,7 @@ public sealed class ConfigurationService(
             }
         }
 
-        foreach (var rule in await db.WeightRules.AsNoTracking().OrderBy(r => r.Id).ToListAsync(cancellationToken))
+        foreach (var rule in await db.WeightRules.AsNoTracking().Where(r => r.DepartmentId == departmentId).OrderBy(r => r.Id).ToListAsync(cancellationToken))
         {
             if (Error(() => RuleCompiler.CompileWeight(rule, before)) is null
                 && Error(() => RuleCompiler.CompileWeight(rule, after)) is { } reason)
@@ -455,6 +473,7 @@ public sealed class ConfigurationService(
         CancellationToken cancellationToken)
     {
         var executors = await db.Executors.AsNoTracking()
+            .Where(e => e.DepartmentId == current.DepartmentId)
             .Select(e => new { e.Id, e.FullName, e.AttributesJson })
             .ToListAsync(cancellationToken);
         var broken = new List<string>();
@@ -481,7 +500,7 @@ public sealed class ConfigurationService(
         }
     }
 
-    private async Task SaveWithAuditAsync(string action, string entity, Func<int> entityId, object? before,
+    private async Task SaveWithAuditAsync(int departmentId, string action, string entity, Func<int> entityId, object? before,
         object? after, CancellationToken cancellationToken)
     {
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
@@ -497,6 +516,7 @@ public sealed class ConfigurationService(
 
             db.AuditEntries.Add(new AuditEntry
             {
+                DepartmentId = departmentId,
                 Actor = Actor,
                 Action = action,
                 Entity = entity,
@@ -514,8 +534,8 @@ public sealed class ConfigurationService(
         logger.LogInformation("Конфигурация изменена: {Action} {Entity} #{EntityId}", action, entity, entityId());
     }
 
-    private async Task<FieldCatalog> CatalogAsync(CancellationToken cancellationToken) =>
-        new(await db.FieldDefinitions.AsNoTracking().ToListAsync(cancellationToken));
+    private async Task<FieldCatalog> CatalogAsync(int departmentId, CancellationToken cancellationToken) =>
+        new(await db.FieldDefinitions.AsNoTracking().Where(f => f.DepartmentId == departmentId).ToListAsync(cancellationToken));
 
     private static void Compile(Action compile)
     {

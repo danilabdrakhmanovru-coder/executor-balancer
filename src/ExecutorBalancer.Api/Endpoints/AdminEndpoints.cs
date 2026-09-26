@@ -9,7 +9,7 @@ namespace ExecutorBalancer.Api.Endpoints;
 public sealed record PreviewRequest(long? ParentId, Dictionary<string, JsonElement>? Attributes);
 
 /// <summary>
-/// Конструктор для администратора: параметры, правила подбора и веса, пробная проверка заявки, журнал.
+/// Конструктор для администратора: отделы, параметры, правила подбора и веса, пробная проверка заявки, журнал.
 /// Только после входа; изменяющие запросы — с заголовком защиты от CSRF.
 /// </summary>
 public static class AdminEndpoints
@@ -22,46 +22,57 @@ public static class AdminEndpoints
             .WithTags("Конструктор")
             .RequireAuthorization()
             .AddEndpointFilter<CsrfHeaderFilter>()
-            .AddEndpointFilter(TranslateErrors);
+            .AddEndpointFilter(TranslateErrors)
+            .AddEndpointFilter(DepartmentScope.RequireDepartment);
 
-        group.MapGet("/config", (ConfigurationService config, CancellationToken ct) => config.GetAsync(ct));
+        group.MapGet("/config", (DepartmentScope d, ConfigurationService config, CancellationToken ct) => config.GetAsync(d.Id, ct));
 
-        group.MapPost("/fields", async (FieldInput input, ConfigurationService config, CancellationToken ct) =>
-            Results.Ok(await config.CreateFieldAsync(input, ct)));
-        group.MapPut("/fields/{id:int}", async (int id, FieldInput input, ConfigurationService config, CancellationToken ct) =>
-            await config.UpdateFieldAsync(id, input, ct) is { } field ? Results.Ok(field) : NotFound());
-        group.MapDelete("/fields/{id:int}", async (int id, ConfigurationService config, CancellationToken ct) =>
-            await config.DeleteFieldAsync(id, ct) ? Results.NoContent() : NotFound());
+        group.MapPost("/fields", async (DepartmentScope d, FieldInput input, ConfigurationService config, CancellationToken ct) =>
+            Results.Ok(await config.CreateFieldAsync(d.Id, input, ct)));
+        group.MapPut("/fields/{id:int}", async (DepartmentScope d, int id, FieldInput input, ConfigurationService config, CancellationToken ct) =>
+            await config.UpdateFieldAsync(d.Id, id, input, ct) is { } field ? Results.Ok(field) : NotFound());
+        group.MapDelete("/fields/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
+            await config.DeleteFieldAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
 
-        group.MapPost("/rules", async (RuleInput input, ConfigurationService config, CancellationToken ct) =>
-            Results.Ok(await config.CreateRuleAsync(input, ct)));
-        group.MapPut("/rules/{id:int}", async (int id, RuleInput input, ConfigurationService config, CancellationToken ct) =>
-            await config.UpdateRuleAsync(id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
-        group.MapDelete("/rules/{id:int}", async (int id, ConfigurationService config, CancellationToken ct) =>
-            await config.DeleteRuleAsync(id, ct) ? Results.NoContent() : NotFound());
+        group.MapPost("/rules", async (DepartmentScope d, RuleInput input, ConfigurationService config, CancellationToken ct) =>
+            Results.Ok(await config.CreateRuleAsync(d.Id, input, ct)));
+        group.MapPut("/rules/{id:int}", async (DepartmentScope d, int id, RuleInput input, ConfigurationService config, CancellationToken ct) =>
+            await config.UpdateRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
+        group.MapDelete("/rules/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
+            await config.DeleteRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
 
-        group.MapPost("/weight-rules", async (WeightRuleInput input, ConfigurationService config, CancellationToken ct) =>
-            Results.Ok(await config.CreateWeightRuleAsync(input, ct)));
+        group.MapPost("/weight-rules", async (DepartmentScope d, WeightRuleInput input, ConfigurationService config, CancellationToken ct) =>
+            Results.Ok(await config.CreateWeightRuleAsync(d.Id, input, ct)));
         group.MapPut("/weight-rules/{id:int}",
-            async (int id, WeightRuleInput input, ConfigurationService config, CancellationToken ct) =>
-                await config.UpdateWeightRuleAsync(id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
-        group.MapDelete("/weight-rules/{id:int}", async (int id, ConfigurationService config, CancellationToken ct) =>
-            await config.DeleteWeightRuleAsync(id, ct) ? Results.NoContent() : NotFound());
+            async (DepartmentScope d, int id, WeightRuleInput input, ConfigurationService config, CancellationToken ct) =>
+                await config.UpdateWeightRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
+        group.MapDelete("/weight-rules/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
+            await config.DeleteWeightRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
 
-        group.MapGet("/presets", (ConfigurationService config, CancellationToken ct) => config.GetPresetsAsync(ct));
-        group.MapPost("/presets/{id}/apply", async (string id, ConfigurationService config, CancellationToken ct) =>
+        group.MapGet("/presets", (DepartmentScope d, ConfigurationService config, CancellationToken ct) => config.GetPresetsAsync(d.Id, ct));
+        group.MapPost("/presets/{id}/apply", async (DepartmentScope d, string id, ConfigurationService config, CancellationToken ct) =>
         {
-            await config.ApplyPresetAsync(id, ct);
+            await config.ApplyPresetAsync(d.Id, id, ct);
             return Results.NoContent();
         });
 
         group.MapPost("/preview", Preview);
-        group.MapGet("/audit", (long? before, int? limit, ConfigurationService config, CancellationToken ct) =>
-            config.GetAuditAsync(before, limit ?? 100, ct));
+
+        // отделы: список общий, изменения — только пустых отделов (см. DepartmentService)
+        group.MapGet("/departments", (DepartmentService departments, CancellationToken ct) => departments.ListAsync(ct));
+        group.MapPost("/departments", async (DepartmentInput input, DepartmentService departments, CancellationToken ct) =>
+            Results.Ok(await departments.CreateAsync(input, ct)));
+        group.MapPut("/departments/{id:int}",
+            async (int id, DepartmentInput input, DepartmentService departments, CancellationToken ct) =>
+                await departments.RenameAsync(id, input, ct) ? Results.NoContent() : NotFound());
+        group.MapDelete("/departments/{id:int}", async (int id, DepartmentService departments, CancellationToken ct) =>
+            await departments.DeleteAsync(id, ct) ? Results.NoContent() : NotFound());
+        group.MapGet("/audit", (DepartmentScope d, long? before, int? limit, ConfigurationService config, CancellationToken ct) =>
+            config.GetAuditAsync(d.Id, before, limit ?? 100, ct));
         return app;
     }
 
-    private static async Task<IResult> Preview(PreviewRequest request, OrderBalancer balancer, CancellationToken ct)
+    private static async Task<IResult> Preview(DepartmentScope d, PreviewRequest request, OrderBalancer balancer, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
         if (request.ParentId is <= 0)
@@ -75,7 +86,7 @@ public static class AdminEndpoints
             return Results.ValidationProblem(errors);
         }
 
-        return Results.Ok(await balancer.PreviewAsync(request.ParentId, request.Attributes ?? NoAttributes, ct));
+        return Results.Ok(await balancer.PreviewAsync(d.Id, request.ParentId, request.Attributes ?? NoAttributes, ct));
     }
 
     /// <summary>Ошибки проверки — 400 с полями, конфликты с действующими правилами и данными — 409.</summary>

@@ -55,7 +55,7 @@ public class SimulationTests
     [Fact]
     public void SeedBuildsRequestedExecutors()
     {
-        var request = new SeedExecutorsRequest(3, [new ValueSpec("subjects", "Array", ["credit", "cards"], MinItems: 1)],
+        var request = new SeedExecutorsRequest(3, [new ValueSpec("subjects", "Array", ["credit", "cards"], MinItems: 1)], null, 1,
             ["Иванов И.", "Петрова А."], [null, 60], [1m, 2m]);
 
         var executors = request.Build(Seeded);

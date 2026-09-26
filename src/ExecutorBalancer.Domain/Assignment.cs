@@ -4,6 +4,8 @@ namespace ExecutorBalancer.Domain;
 public class Assignment
 {
     public long Id { get; set; }
+
+    public int DepartmentId { get; set; } = Department.DefaultId;
     public long OrderId { get; set; }
     public long ExecutorId { get; set; }
     public AssignmentKind Kind { get; set; }

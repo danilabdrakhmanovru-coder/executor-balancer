@@ -32,9 +32,10 @@ public sealed class OrderBalancer(
 
     private readonly TimeZoneInfo _timeZone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
 
-    public async Task<BalanceResult> ReceiveAsync(IncomingOrder incoming, CancellationToken cancellationToken)
+    public async Task<BalanceResult> ReceiveAsync(int departmentId, IncomingOrder incoming,
+        CancellationToken cancellationToken)
     {
-        var snapshot = await directory.GetAsync(cancellationToken);
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
         var errors = new Dictionary<string, string[]>();
         var values = snapshot.Catalog.Parse(FieldOwner.Order, incoming.Attributes, errors);
         if (errors.Count > 0)
@@ -51,6 +52,7 @@ public sealed class OrderBalancer(
         var order = new Order
         {
             Id = incoming.Id,
+            DepartmentId = departmentId,
             ParentId = incoming.ParentId,
             Status = incoming.Status,
             Weight = snapshot.OrderWeight(values),
@@ -114,7 +116,7 @@ public sealed class OrderBalancer(
                 var returned = previousStatus == OrderStatus.Processed && status == OrderStatus.Await;
                 if (closed || returned)
                 {
-                    await ExecutorStats.RecordAsync(db, now,
+                    await ExecutorStats.RecordAsync(db, now, order.DepartmentId,
                         [new StatDelta(owner, Closed: closed ? 1 : 0, Returned: returned ? 1 : 0)], cancellationToken);
                 }
             }
@@ -128,7 +130,7 @@ public sealed class OrderBalancer(
         }
 
         logger.LogDebug("Заявка {OrderId} вернулась в рассмотрение из статуса {Status}", order.Id, previousStatus);
-        var snapshot = await directory.GetAsync(cancellationToken);
+        var snapshot = await directory.GetAsync(order.DepartmentId, cancellationToken);
         var values = snapshot.Catalog.ParseStored(FieldOwner.Order, order.AttributesJson);
         return await AssignAsync(order, values, snapshot, order.ExecutorId, reopen: true, cancellationToken);
     }
@@ -142,15 +144,19 @@ public sealed class OrderBalancer(
             return null;
         }
 
-        var snapshot = await directory.GetAsync(cancellationToken);
+        var snapshot = await directory.GetAsync(order.DepartmentId, cancellationToken);
         var values = snapshot.Catalog.ParseStored(FieldOwner.Order, order.AttributesJson);
         // reopen: заявка могла раньше принадлежать исполнителю и вернуться в очередь
         return await AssignAsync(order, values, snapshot, previousExecutorId: null, reopen: true, cancellationToken);
     }
 
-    public async Task UpsertExecutorAsync(IncomingExecutor incoming, CancellationToken cancellationToken)
+    /// <summary>
+    /// Сотрудник из АИС. Если он числился в другом отделе — переводится: его открытые заявки там
+    /// перераспределяются между коллегами прежнего отдела, как при уходе.
+    /// </summary>
+    public async Task UpsertExecutorAsync(int departmentId, IncomingExecutor incoming, CancellationToken cancellationToken)
     {
-        var snapshot = await directory.GetAsync(cancellationToken);
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
         var errors = new Dictionary<string, string[]>();
         snapshot.Catalog.Parse(FieldOwner.Executor, incoming.Attributes, errors);
         if (errors.Count > 0)
@@ -161,11 +167,13 @@ public sealed class OrderBalancer(
         var executor = await db.Executors.FirstOrDefaultAsync(e => e.Id == incoming.Id, cancellationToken);
         if (executor is null)
         {
-            executor = new Executor { Id = incoming.Id };
+            executor = new Executor { Id = incoming.Id, DepartmentId = departmentId };
             db.Executors.Add(executor);
         }
 
         var wasActive = executor.IsActive;
+        var moved = executor.DepartmentId != departmentId;
+        executor.DepartmentId = departmentId;
         executor.FullName = incoming.FullName;
         executor.IsActive = incoming.IsActive;
         executor.DailyLimit = incoming.DailyLimit;
@@ -182,7 +190,7 @@ public sealed class OrderBalancer(
         await loadStore.BumpConfigVersionAsync(cancellationToken);
         directory.Invalidate();
 
-        if (wasActive && !executor.IsActive)
+        if ((wasActive && !executor.IsActive) || moved)
         {
             await ReassignOpenOrdersAsync(executor.Id, cancellationToken);
         }
@@ -199,15 +207,15 @@ public sealed class OrderBalancer(
             return;
         }
 
-        var snapshot = await directory.GetAsync(cancellationToken);
         foreach (var order in orders)
         {
+            var snapshot = await directory.GetAsync(order.DepartmentId, cancellationToken);
             await loadStore.ReleaseAsync(order.Id, LoadRelease.Await, cancellationToken);
             var values = snapshot.Catalog.ParseStored(FieldOwner.Order, order.AttributesJson);
             await AssignAsync(order, values, snapshot, executorId, reopen: true, cancellationToken);
         }
 
-        logger.LogInformation("Исполнитель {ExecutorId} деактивирован, перераспределено заявок: {Count}",
+        logger.LogInformation("Исполнитель {ExecutorId} ушёл или переведён, перераспределено заявок: {Count}",
             executorId, orders.Count);
     }
 
@@ -218,10 +226,10 @@ public sealed class OrderBalancer(
     /// Пробная проверка из конструктора: кому ушла бы заявка с такими параметрами прямо сейчас и почему.
     /// Ничего не назначает и не меняет счётчики.
     /// </summary>
-    public async Task<AssignmentExplanation> PreviewAsync(long? parentId,
+    public async Task<AssignmentExplanation> PreviewAsync(int departmentId, long? parentId,
         IReadOnlyDictionary<string, JsonElement> attributes, CancellationToken cancellationToken)
     {
-        var snapshot = await directory.GetAsync(cancellationToken);
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
         var errors = new Dictionary<string, string[]>();
         var values = snapshot.Catalog.Parse(FieldOwner.Order, attributes, errors);
         if (errors.Count > 0)
@@ -418,6 +426,7 @@ public sealed class OrderBalancer(
 
             db.Assignments.Add(new Assignment
             {
+                DepartmentId = order.DepartmentId,
                 OrderId = order.Id,
                 ExecutorId = executorId,
                 Kind = kind,
@@ -438,11 +447,12 @@ public sealed class OrderBalancer(
             order.AssignedAt = now;
             order.PendingReason = null;
             await db.SaveChangesAsync(cancellationToken);
-            await ExecutorStats.RecordAsync(db, now, StatDeltas(kind, executorId, order.Weight), cancellationToken);
+            await ExecutorStats.RecordAsync(db, now, order.DepartmentId, StatDeltas(kind, executorId, order.Weight),
+                cancellationToken);
             if (kind is AssignmentKind.Primary or AssignmentKind.Reassign)
             {
                 // кто мог получить эту заявку: по этим группам считается эталон справедливого распределения
-                await ExecutorStats.RecordEligibilityAsync(db, now,
+                await ExecutorStats.RecordEligibilityAsync(db, now, order.DepartmentId,
                     pick.Report.Where(r => r.Verdict == "eligible").Select(r => r.ExecutorId), order.Weight,
                     cancellationToken);
             }

@@ -4,6 +4,8 @@ namespace ExecutorBalancer.Domain;
 public class WeightRule
 {
     public int Id { get; set; }
+
+    public int DepartmentId { get; set; } = Department.DefaultId;
     public bool IsEnabled { get; set; } = true;
     public int Priority { get; set; }
     public string OrderField { get; set; } = "";
