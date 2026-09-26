@@ -1,345 +1,449 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Executor Balancer</title>
+  <link rel="stylesheet" href="vendor/tabler/tabler.min.css">
   <link rel="stylesheet" href="app.css">
   <script type="module" src="js/main.js"></script>
 </head>
 <body>
-  <section id="login" class="login hidden">
-    <form id="login-form" class="card login-card">
-      <h1>Executor Balancer</h1>
-      <p class="muted">Вход администратора</p>
-      <input id="password" type="password" autocomplete="current-password" placeholder="Пароль" required maxlength="200">
-      <button type="submit">Войти</button>
-      <p id="login-error" class="error"></p>
-    </form>
+  <!-- Вход -->
+  <section id="login" class="page page-center hidden">
+    <div class="container container-tight py-4">
+      <div class="text-center mb-4">
+        <span class="brand-mark"><svg class="icon"><use href="icons.svg#arrows-shuffle"></use></svg></span>
+        <h1 class="mt-2 mb-0">Executor Balancer</h1>
+        <div class="text-secondary">распределение заявок между исполнителями</div>
+      </div>
+      <form id="login-form" class="card card-md">
+        <div class="card-body">
+          <h2 class="h2 text-center mb-4">Вход администратора</h2>
+          <label class="form-label" for="password">Пароль</label>
+          <input id="password" class="form-control" type="password" autocomplete="current-password" required maxlength="200">
+          <p id="login-error" class="text-danger mt-2 mb-0"></p>
+          <div class="form-footer mt-3">
+            <button type="submit" class="btn btn-primary w-100">Войти</button>
+          </div>
+        </div>
+      </form>
+    </div>
   </section>
 
-  <main id="app" class="hidden">
-    <header class="topbar">
-      <div class="brand">
-        <h1>Executor Balancer</h1>
-        <span class="muted">распределение заявок в реальном времени</span>
-      </div>
-      <nav class="tabs" id="tabs">
-        <button data-tab="demo" class="tab hidden" id="tab-button-demo">Демонстрация</button>
-        <button data-tab="overview" class="tab">Обзор</button>
-        <button data-tab="executors" class="tab">Исполнители</button>
-        <button data-tab="analytics" class="tab">Аналитика</button>
-        <button data-tab="constructor" class="tab">Конструктор</button>
-        <button data-tab="preview" class="tab">Проверка заявки</button>
-        <button data-tab="audit" class="tab">Журнал</button>
-      </nav>
-      <div class="topbar-right">
-        <span id="updated" class="muted"></span>
-        <button id="logout" class="ghost">Выйти</button>
+  <div id="app" class="page hidden">
+    <header class="navbar navbar-expand d-print-none app-header">
+      <div class="container-xl">
+        <div class="navbar-brand">
+          <span class="brand-mark"><svg class="icon"><use href="icons.svg#arrows-shuffle"></use></svg></span>
+          <span>
+            <span class="brand-title">Executor Balancer</span>
+            <span class="brand-sub">распределение заявок в реальном времени</span>
+          </span>
+        </div>
+        <div class="navbar-nav flex-row ms-auto align-items-center gap-2">
+          <span id="updated" class="text-secondary small d-none d-md-inline"></span>
+          <button id="theme" class="btn btn-icon btn-ghost-secondary" type="button" title="Светлая или тёмная тема" aria-label="Тема">
+            <svg class="icon theme-dark"><use href="icons.svg#moon"></use></svg>
+            <svg class="icon theme-light"><use href="icons.svg#sun"></use></svg>
+          </button>
+          <button id="logout" class="btn btn-outline-secondary" type="button">
+            <svg class="icon"><use href="icons.svg#logout"></use></svg><span class="d-none d-sm-inline">Выйти</span>
+          </button>
+        </div>
       </div>
     </header>
-
-    <!-- Демонстрация -->
-    <section id="tab-demo" class="tab-page hidden">
-      <div class="card intro">
-        <h2>Как это работает</h2>
-        <p>Клиенты оставляют обращения во внешней системе компании — АИС (CRM, учётная система банка, склада, магазина).
-          АИС сразу передаёт каждое обращение сюда, и сервис за доли секунды решает, какому сотруднику его отдать:
-          только тем, кто сейчас работает и подходит по правилам из конструктора, а из них — тому, у кого меньше нагрузка
-          с учётом опыта. Решение уходит обратно в АИС.</p>
-        <p class="muted">Настоящей АИС на демонстрации нет — её изображает эмулятор. Пульт ниже управляет им: выбирает сферу,
-          заводит сотрудников, запускает поток обращений и имитирует работу сотрудников (решено, отказ, на доработку).</p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>Путь заявки — прямо сейчас</h2>
-          <span id="demo-ais-error" class="error"></span>
-        </div>
-        <div id="demo-flow" class="flow"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h2><span class="step-no">1</span> Сфера деятельности</h2></div>
-        <p class="hint">Сервис не привязан к банку: параметры и правила — это настройки, а не код. Шаблон заменяет параметры,
-          правила и веса на набор для другой отрасли; поток заявок и сотрудники подстроятся под него.</p>
-        <div id="demo-presets" class="presets"></div>
-      </div>
-
-      <section class="grid grid-even">
-        <div class="card">
-          <div class="card-head"><h2><span class="step-no">2</span> Сотрудники</h2></div>
-          <p class="hint">Заводит сотрудников в АИС со случайными навыками, опытом и дневными лимитами в рамках выбранной сферы.
-            АИС передаёт их балансировщику. Прежние сотрудники сверх нового числа уходят в неактивные.</p>
-          <div id="demo-seed-count"></div>
-          <div class="row-actions">
-            <button id="demo-seed" type="button">Завести сотрудников</button>
-            <a class="button ghost" href="#executors">Посмотреть →</a>
-          </div>
-          <p id="demo-executors-count" class="muted"></p>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2><span class="step-no">3</span> Поток обращений</h2></div>
-          <p class="hint">Эмулятор создаёт обращения с заданной скоростью, а сотрудники в нём «работают»: каждую секунду
-            часть назначенных заявок решается, отклоняется или уходит на доработку и потом возвращается.</p>
-          <input id="demo-rate" type="range" min="500" max="40000" step="500" value="4000" aria-label="Скорость потока">
-          <p id="demo-rate-label" class="rate"></p>
-          <div class="row-actions">
-            <button id="demo-start" type="button">Запустить</button>
-            <button id="demo-stop" type="button" class="ghost">Остановить</button>
-          </div>
-          <p id="demo-sim-status" class="muted"></p>
-        </div>
-      </section>
-
-      <section class="grid">
-        <div class="card">
-          <div class="card-head">
-            <h2><span class="step-no">4</span> Одно обращение вручную</h2>
-            <button id="demo-order-sample" class="ghost" type="button">Заполнить примером</button>
-          </div>
-          <p class="hint">Как будто клиент оставил обращение: оно создаётся в АИС и проходит весь путь. Ниже появится,
-            кому оно ушло и почему остальные не подошли.</p>
-          <form id="demo-order-form" class="form">
-            <div id="demo-order-fields" class="form"></div>
-            <button id="demo-order-send" type="submit">Отправить в АИС</button>
-          </form>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Кому ушло</h2></div>
-          <div id="demo-order-result"><p class="muted">Здесь появится решение по вашему обращению.</p></div>
-        </div>
-      </section>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>Последние назначения</h2>
-          <span class="muted">щёлкните — покажет, почему выбран этот сотрудник</span>
-        </div>
-        <div id="demo-feed" class="feed"></div>
-      </div>
-    </section>
-
-    <!-- Исполнители -->
-    <section id="tab-executors" class="tab-page hidden">
-      <p class="hint">Сотрудники, которых передала АИС: что умеют (параметры из конструктора), насколько загружены и сколько
-        получили сегодня. Заявка достаётся только тому, кто на работе и подходит по всем правилам.</p>
-      <div id="executors-list" class="executors-grid"></div>
-    </section>
-
-    <!-- Обзор -->
-    <section id="tab-overview" class="tab-page hidden">
-      <p class="hint">Мониторинг в реальном времени: сколько заявок, как загружены сотрудники и кому уходят новые заявки.
-        Обновляется каждые 2 секунды.</p>
-      <section class="tiles" id="tiles"></section>
-      <p id="rule-errors" class="error"></p>
-      <div class="card">
-        <div class="card-head">
-          <h2>Назначения по минутам</h2>
-          <span class="muted">последние 30 минут</span>
-        </div>
-        <div id="live-chart" class="chart chart-small"></div>
-      </div>
-      <section class="grid">
-        <div class="card">
-          <div class="card-head">
-            <h2>Исполнители</h2>
-            <span class="muted">полоса — открытый вес на единицу квалификации</span>
-          </div>
-          <div class="scroll">
-            <table>
-              <thead>
-                <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th>Сегодня / лимит</th><th title="Отклонение от справедливой доли за сегодня">Откл.</th></tr>
-              </thead>
-              <tbody id="executors"></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <h2>Лента назначений</h2>
-            <form id="lookup" class="lookup">
-              <input id="lookup-id" type="number" min="1" placeholder="№ заявки">
-              <button type="submit" class="ghost">Найти</button>
-            </form>
-          </div>
-          <div class="scroll">
-            <table>
-              <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th>Score</th></tr></thead>
-              <tbody id="feed"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-    </section>
-
-    <!-- Аналитика -->
-    <section id="tab-analytics" class="tab-page hidden">
-      <div class="toolbar">
-        <div class="segmented" id="period">
-          <button data-period="today">Сегодня</button>
-          <button data-period="24h">24 часа</button>
-          <button data-period="7d">7 дней</button>
-          <button data-period="30d">30 дней</button>
-        </div>
-        <a id="export" class="button ghost" href="/api/dashboard/export.csv?period=today" download>Выгрузить в Excel (CSV)</a>
-      </div>
-      <section class="tiles" id="an-tiles"></section>
-      <div class="card">
-        <div class="card-head">
-          <h2>Динамика</h2>
-          <span class="legend"><i class="dot series-a"></i>назначено <i class="dot series-b"></i>решено и отклонено <i class="dot series-c"></i>на доработку</span>
-        </div>
-        <div id="an-timeline" class="chart"></div>
-      </div>
-      <section class="grid grid-even">
-        <div class="card">
-          <div class="card-head">
-            <h2>Отклонение от справедливой доли</h2>
-            <span class="muted">норма — в пределах ±2%</span>
-          </div>
-          <div id="an-deviation" class="chart"></div>
-          <p class="hint">Справедливый вес — идеально выровненное распределение того же потока заявок: нагрузка на единицу
-            квалификации как можно ровнее с учётом того, кто какие заявки мог взять и кто в это время работал.
-            Заявки от родителя и вторичные обязаны идти «своему» исполнителю — они учитываются как уже занятая часть нагрузки.</p>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Типы назначений</h2></div>
-          <div id="an-kinds" class="chart chart-small"></div>
-        </div>
-      </section>
-      <div class="card">
-        <div class="card-head"><h2>По исполнителям</h2></div>
-        <div class="scroll">
-          <table>
-            <thead>
-              <tr><th>Исполнитель</th><th>Квал.</th><th>Назначено</th><th>Вес</th><th title="Вес заявок, где исполнителя выбирал алгоритм">Свободный выбор</th><th title="Вес при идеально ровном распределении">Справедливый вес</th><th>Откл., %</th><th>Решено</th><th>На доработку</th><th>Возвраты, %</th></tr>
-            </thead>
-            <tbody id="an-executors"></tbody>
-          </table>
+    <nav class="app-nav d-print-none">
+      <div class="container-xl">
+        <div class="app-tabs" id="tabs">
+          <button data-tab="demo" class="nav-link tab hidden" id="tab-button-demo" type="button"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Демонстрация</button>
+          <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Обзор</button>
+          <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Исполнители</button>
+          <button data-tab="analytics" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Аналитика</button>
+          <button data-tab="constructor" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#adjustments"></use></svg>Конструктор</button>
+          <button data-tab="preview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#zoom-check"></use></svg>Проверка заявки</button>
+          <button data-tab="audit" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#history"></use></svg>Журнал</button>
         </div>
       </div>
-    </section>
+    </nav>
 
-    <!-- Конструктор -->
-    <section id="tab-constructor" class="tab-page hidden">
-      <div class="card intro">
-        <h2>Как устроен конструктор</h2>
-        <p><strong>Параметр</strong> — характеристика заявки (например, «Тематика», «Сумма») или сотрудника («Тематики»,
-          «Максимальная сумма»). АИС передаёт значения под этими ключами. <strong>Правило</strong> связывает их:
-          «Тематика заявки — одно из — Тематики сотрудника». Сотрудник получает заявку, только если выполнены все правила.
-          <strong>Вес заявки</strong> — насколько она сложная: сложные нагружают сильнее.</p>
-        <p class="muted">Изменения применяются сразу, без перезапуска и программиста: следующая заявка распределяется уже
-          по новым правилам. Каждое изменение проверяется и записывается в журнал.</p>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Шаблоны сфер</h2></div>
-        <p class="hint">Готовые наборы параметров и правил для разных отраслей — можно взять за основу и дополнить своими.</p>
-        <div id="constructor-presets" class="presets"></div>
-      </div>
-      <section class="stack">
-        <div class="card">
-          <div class="card-head">
-            <h2>Параметры заявки</h2>
-            <button class="ghost" data-add-field="Order">+ Параметр</button>
-          </div>
-          <div class="scroll"><table>
-            <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
-            <tbody id="fields-order"></tbody>
-          </table></div>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <h2>Параметры исполнителя</h2>
-            <button class="ghost" data-add-field="Executor">+ Параметр</button>
-          </div>
-          <div class="scroll"><table>
-            <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
-            <tbody id="fields-executor"></tbody>
-          </table></div>
-        </div>
-      </section>
-      <div class="card">
-        <div class="card-head">
-          <h2>Правила подбора</h2>
-          <button id="add-rule">+ Правило</button>
-        </div>
-        <p class="hint">Исполнитель подходит, если выполнены все включённые правила. Пустое значение не ограничивает выбор,
-          если правило не строгое.</p>
-        <div class="scroll"><table>
-          <thead><tr><th>Вкл.</th><th>Приоритет</th><th>Название</th><th>Условие</th><th>Строгое</th><th></th></tr></thead>
-          <tbody id="rules"></tbody>
-        </table></div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <h2>Вес заявки</h2>
-          <button id="add-weight-rule">+ Правило веса</button>
-        </div>
-        <p class="hint" id="weight-hint"></p>
-        <div class="scroll"><table>
-          <thead><tr><th>Вкл.</th><th>Приоритет</th><th>Условие</th><th>Вес</th><th></th></tr></thead>
-          <tbody id="weight-rules"></tbody>
-        </table></div>
-      </div>
-    </section>
+    <div class="page-wrapper">
+      <div class="page-body">
+        <div class="container-xl">
 
-    <!-- Проверка заявки -->
-    <section id="tab-preview" class="tab-page hidden">
-      <section class="grid">
-        <div class="card">
-          <div class="card-head">
-            <h2>Параметры заявки</h2>
-            <button id="preview-sample" class="ghost" type="button">Заполнить примером</button>
-          </div>
-          <p class="hint">Проверка ничего не назначает: показывает, кому ушла бы такая заявка прямо сейчас и почему.</p>
-          <form id="preview-form" class="form"></form>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>Результат</h2></div>
-          <div id="preview-result"><p class="muted">Заполните параметры и нажмите «Кому уйдёт заявка?».</p></div>
-        </div>
-      </section>
-    </section>
+          <!-- Демонстрация -->
+          <section id="tab-demo" class="tab-page hidden">
+            <div class="card intro">
+              <div class="card-body">
+                <div class="d-flex gap-3">
+                  <span class="avatar avatar-md bg-primary-lt"><svg class="icon"><use href="icons.svg#info-circle"></use></svg></span>
+                  <div>
+                    <h3 class="card-title mb-2">Как это работает</h3>
+                    <p class="mb-2">Клиенты оставляют обращения во внешней системе компании — АИС (CRM, учётная система банка, склада,
+                      магазина). АИС сразу передаёт каждое обращение сюда, и сервис за доли секунды решает, какому сотруднику его отдать:
+                      только тем, кто сейчас работает и подходит по правилам из конструктора, а из них — тому, у кого меньше нагрузка
+                      с учётом опыта. Решение уходит обратно в АИС.</p>
+                    <p class="text-secondary mb-0">Настоящей АИС на демонстрации нет — её изображает эмулятор. Пульт ниже управляет им:
+                      выбирает сферу, заводит сотрудников, запускает поток обращений и имитирует работу сотрудников
+                      (решено, отказ, на доработку).</p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-    <!-- Журнал -->
-    <section id="tab-audit" class="tab-page hidden">
-      <div class="card">
-        <div class="card-head">
-          <h2>Журнал изменений и входов</h2>
-          <button id="audit-refresh" class="ghost">Обновить</button>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Путь заявки — прямо сейчас</h3>
+                <div class="card-actions"><span id="demo-ais-error" class="text-danger"></span></div>
+              </div>
+              <div class="card-body"><div id="demo-flow" class="flow"></div></div>
+            </div>
+
+            <div class="card">
+              <div class="card-header"><h3 class="card-title"><span class="step-no">1</span>Сфера деятельности</h3></div>
+              <div class="card-body">
+                <p class="text-secondary">Сервис не привязан к банку: параметры и правила — это настройки, а не код. Шаблон заменяет
+                  параметры, правила и веса на набор для другой отрасли; поток заявок и сотрудники подстроятся под него.</p>
+                <div id="demo-presets" class="presets"></div>
+              </div>
+            </div>
+
+            <div class="row row-cards">
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title"><span class="step-no">2</span>Сотрудники</h3></div>
+                  <div class="card-body">
+                    <p class="text-secondary">Заводит сотрудников в АИС со случайными навыками, опытом и дневными лимитами в рамках
+                      выбранной сферы. АИС передаёт их балансировщику. Прежние сотрудники сверх нового числа уходят в неактивные.</p>
+                    <div id="demo-seed-count" class="mb-3"></div>
+                    <div class="btn-list">
+                      <button id="demo-seed" class="btn btn-primary" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Завести сотрудников</button>
+                      <a class="btn" href="#executors">Посмотреть<svg class="icon ms-1"><use href="icons.svg#arrow-right"></use></svg></a>
+                    </div>
+                    <p id="demo-executors-count" class="text-secondary mt-3 mb-0"></p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title"><span class="step-no">3</span>Поток обращений</h3></div>
+                  <div class="card-body">
+                    <p class="text-secondary">Эмулятор создаёт обращения с заданной скоростью, а сотрудники в нём «работают»: каждую
+                      секунду часть назначенных заявок решается, отклоняется или уходит на доработку и потом возвращается.</p>
+                    <input id="demo-rate" class="form-range" type="range" min="500" max="40000" step="500" value="4000" aria-label="Скорость потока">
+                    <p id="demo-rate-label" class="rate"></p>
+                    <div class="btn-list">
+                      <button id="demo-start" class="btn btn-success" type="button"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Запустить</button>
+                      <button id="demo-stop" class="btn" type="button"><svg class="icon"><use href="icons.svg#player-stop"></use></svg>Остановить</button>
+                    </div>
+                    <p id="demo-sim-status" class="text-secondary mt-3 mb-0"></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row row-cards">
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title"><span class="step-no">4</span>Одно обращение вручную</h3>
+                    <div class="card-actions">
+                      <button id="demo-order-sample" class="btn btn-sm" type="button"><svg class="icon"><use href="icons.svg#wand"></use></svg>Заполнить примером</button>
+                    </div>
+                  </div>
+                  <div class="card-body">
+                    <p class="text-secondary">Как будто клиент оставил обращение: оно создаётся в АИС и проходит весь путь. Справа
+                      появится, кому оно ушло и почему остальные не подошли.</p>
+                    <form id="demo-order-form">
+                      <div id="demo-order-fields" class="form-grid"></div>
+                      <button id="demo-order-send" class="btn btn-primary w-100 mt-3" type="submit"><svg class="icon"><use href="icons.svg#send"></use></svg>Отправить в АИС</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Кому ушло</h3></div>
+                  <div class="card-body" id="demo-order-result">
+                    <div class="empty">
+                      <div class="empty-icon"><svg class="icon"><use href="icons.svg#mail-forward"></use></svg></div>
+                      <p class="empty-title">Решение появится здесь</p>
+                      <p class="empty-subtitle text-secondary">Заполните обращение слева и отправьте его в АИС.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Последние назначения</h3>
+                <div class="card-actions text-secondary">щёлкните — покажет, почему выбран этот сотрудник</div>
+              </div>
+              <div class="list-group list-group-flush" id="demo-feed"></div>
+            </div>
+          </section>
+
+          <!-- Исполнители -->
+          <section id="tab-executors" class="tab-page hidden">
+            <p class="page-hint">Сотрудники, которых передала АИС: что умеют (параметры из конструктора), насколько загружены и
+              сколько получили сегодня. Заявка достаётся только тому, кто на работе и подходит по всем правилам.</p>
+            <div id="executors-list" class="executors-grid"></div>
+          </section>
+
+          <!-- Обзор -->
+          <section id="tab-overview" class="tab-page hidden">
+            <p class="page-hint">Мониторинг в реальном времени: сколько заявок, как загружены сотрудники и кому уходят новые заявки.
+              Обновляется каждые 2 секунды.</p>
+            <div class="row row-cards tiles" id="tiles"></div>
+            <p id="rule-errors" class="text-danger"></p>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Назначения по минутам</h3>
+                <div class="card-actions text-secondary">последние 30 минут</div>
+              </div>
+              <div class="card-body"><div id="live-chart" class="chart chart-small"></div></div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-xl-7">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title">Исполнители</h3>
+                    <div class="card-actions text-secondary">полоса — открытый вес на единицу квалификации</div>
+                  </div>
+                  <div class="table-responsive scroll">
+                    <table class="table card-table table-vcenter">
+                      <thead>
+                        <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th>Сегодня / лимит</th><th title="Отклонение от справедливой доли за сегодня">Откл.</th></tr>
+                      </thead>
+                      <tbody id="executors"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div class="col-xl-5">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title">Лента назначений</h3>
+                    <div class="card-actions">
+                      <form id="lookup" class="input-group input-group-sm lookup">
+                        <input id="lookup-id" class="form-control" type="number" min="1" placeholder="№ заявки">
+                        <button type="submit" class="btn">Найти</button>
+                      </form>
+                    </div>
+                  </div>
+                  <div class="table-responsive scroll">
+                    <table class="table card-table table-vcenter table-hover">
+                      <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th>Score</th></tr></thead>
+                      <tbody id="feed"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Аналитика -->
+          <section id="tab-analytics" class="tab-page hidden">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div class="btn-group" id="period" role="group" aria-label="Период">
+                <button class="btn" data-period="today" type="button">Сегодня</button>
+                <button class="btn" data-period="24h" type="button">24 часа</button>
+                <button class="btn" data-period="7d" type="button">7 дней</button>
+                <button class="btn" data-period="30d" type="button">30 дней</button>
+              </div>
+              <a id="export" class="btn" href="/api/dashboard/export.csv?period=today" download><svg class="icon"><use href="icons.svg#download"></use></svg>Выгрузить в Excel (CSV)</a>
+            </div>
+            <div class="row row-cards tiles" id="an-tiles"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Динамика</h3>
+                <div class="card-actions legend"><i class="dot series-a"></i>назначено <i class="dot series-b"></i>решено и отклонено <i class="dot series-c"></i>на доработку</div>
+              </div>
+              <div class="card-body"><div id="an-timeline" class="chart"></div></div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-lg-7">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title">Отклонение от справедливой доли</h3>
+                    <div class="card-actions text-secondary">норма — в пределах ±2%</div>
+                  </div>
+                  <div class="card-body">
+                    <div id="an-deviation" class="chart"></div>
+                    <p class="text-secondary small mt-3 mb-0">Справедливый вес — идеально выровненное распределение того же потока заявок:
+                      нагрузка на единицу квалификации как можно ровнее с учётом того, кто какие заявки мог взять и кто в это время
+                      работал. Заявки от родителя и вторичные обязаны идти «своему» исполнителю — они учитываются как уже занятая
+                      часть нагрузки.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-5">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Типы назначений</h3></div>
+                  <div class="card-body"><div id="an-kinds" class="chart chart-small"></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">По исполнителям</h3></div>
+              <div class="table-responsive scroll">
+                <table class="table card-table table-vcenter">
+                  <thead>
+                    <tr><th>Исполнитель</th><th>Квал.</th><th>Назначено</th><th>Вес</th><th title="Вес заявок, где исполнителя выбирал алгоритм">Свободный выбор</th><th title="Вес при идеально ровном распределении">Справедливый вес</th><th>Откл., %</th><th>Решено</th><th>На доработку</th><th>Возвраты, %</th></tr>
+                  </thead>
+                  <tbody id="an-executors"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- Конструктор -->
+          <section id="tab-constructor" class="tab-page hidden">
+            <div class="card intro">
+              <div class="card-body">
+                <div class="d-flex gap-3">
+                  <span class="avatar avatar-md bg-primary-lt"><svg class="icon"><use href="icons.svg#adjustments"></use></svg></span>
+                  <div>
+                    <h3 class="card-title mb-2">Как устроен конструктор</h3>
+                    <p class="mb-2"><strong>Параметр</strong> — характеристика заявки (например, «Тематика», «Сумма») или сотрудника
+                      («Тематики», «Максимальная сумма»). АИС передаёт значения под этими ключами. <strong>Правило</strong> связывает
+                      их: «Тематика заявки — одно из — Тематики сотрудника». Сотрудник получает заявку, только если выполнены все
+                      правила. <strong>Вес заявки</strong> — насколько она сложная: сложные нагружают сильнее.</p>
+                    <p class="text-secondary mb-0">Изменения применяются сразу, без перезапуска и программиста: следующая заявка
+                      распределяется уже по новым правилам. Каждое изменение проверяется и записывается в журнал.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Шаблоны сфер</h3></div>
+              <div class="card-body">
+                <p class="text-secondary">Готовые наборы параметров и правил для разных отраслей — можно взять за основу и дополнить своими.</p>
+                <div id="constructor-presets" class="presets"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Параметры заявки</h3>
+                <div class="card-actions"><button class="btn btn-sm" data-add-field="Order" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Параметр</button></div>
+              </div>
+              <div class="table-responsive"><table class="table card-table table-vcenter">
+                <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
+                <tbody id="fields-order"></tbody>
+              </table></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Параметры исполнителя</h3>
+                <div class="card-actions"><button class="btn btn-sm" data-add-field="Executor" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Параметр</button></div>
+              </div>
+              <div class="table-responsive"><table class="table card-table table-vcenter">
+                <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
+                <tbody id="fields-executor"></tbody>
+              </table></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Правила подбора</h3>
+                <div class="card-actions"><button id="add-rule" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Правило</button></div>
+              </div>
+              <div class="card-body pb-0">
+                <p class="text-secondary">Исполнитель подходит, если выполнены все включённые правила. Пустое значение не ограничивает
+                  выбор, если правило не строгое.</p>
+              </div>
+              <div class="table-responsive"><table class="table card-table table-vcenter">
+                <thead><tr><th>Вкл.</th><th>Приоритет</th><th>Название</th><th>Условие</th><th>Строгое</th><th></th></tr></thead>
+                <tbody id="rules"></tbody>
+              </table></div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Вес заявки</h3>
+                <div class="card-actions"><button id="add-weight-rule" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Правило веса</button></div>
+              </div>
+              <div class="card-body pb-0"><p class="text-secondary" id="weight-hint"></p></div>
+              <div class="table-responsive"><table class="table card-table table-vcenter">
+                <thead><tr><th>Вкл.</th><th>Приоритет</th><th>Условие</th><th>Вес</th><th></th></tr></thead>
+                <tbody id="weight-rules"></tbody>
+              </table></div>
+            </div>
+          </section>
+
+          <!-- Проверка заявки -->
+          <section id="tab-preview" class="tab-page hidden">
+            <div class="row row-cards">
+              <div class="col-lg-5">
+                <div class="card h-100">
+                  <div class="card-header">
+                    <h3 class="card-title">Параметры заявки</h3>
+                    <div class="card-actions"><button id="preview-sample" class="btn btn-sm" type="button"><svg class="icon"><use href="icons.svg#wand"></use></svg>Заполнить примером</button></div>
+                  </div>
+                  <div class="card-body">
+                    <p class="text-secondary">Проверка ничего не назначает: показывает, кому ушла бы такая заявка прямо сейчас и почему.</p>
+                    <form id="preview-form" class="form-grid"></form>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-7">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Результат</h3></div>
+                  <div class="card-body" id="preview-result">
+                    <div class="empty">
+                      <div class="empty-icon"><svg class="icon"><use href="icons.svg#zoom-check"></use></svg></div>
+                      <p class="empty-title">Кому уйдёт заявка?</p>
+                      <p class="empty-subtitle text-secondary">Заполните параметры и нажмите кнопку под формой.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Журнал -->
+          <section id="tab-audit" class="tab-page hidden">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Журнал изменений и входов</h3>
+                <div class="card-actions"><button id="audit-refresh" class="btn btn-sm" type="button"><svg class="icon"><use href="icons.svg#refresh"></use></svg>Обновить</button></div>
+              </div>
+              <div class="table-responsive scroll tall"><table class="table card-table table-vcenter">
+                <thead><tr><th>Время</th><th>Событие</th><th>Объект</th><th>Подробности</th></tr></thead>
+                <tbody id="audit"></tbody>
+              </table></div>
+              <div class="card-footer">
+                <button id="audit-more" class="btn w-100 hidden" type="button">Показать ещё</button>
+              </div>
+            </div>
+          </section>
+
         </div>
-        <div class="scroll tall"><table>
-          <thead><tr><th>Время</th><th>Событие</th><th>Объект</th><th>Подробности</th></tr></thead>
-          <tbody id="audit"></tbody>
-        </table></div>
-        <button id="audit-more" class="ghost more hidden">Показать ещё</button>
       </div>
-    </section>
-  </main>
+    </div>
+  </div>
 
-  <dialog id="details">
+  <dialog id="details" class="app-dialog">
     <div class="dialog-head">
-      <h2 id="details-title"></h2>
-      <button id="details-close" class="ghost" type="button">Закрыть</button>
+      <h3 id="details-title" class="mb-0"></h3>
+      <button id="details-close" class="btn btn-icon btn-ghost-secondary" type="button" aria-label="Закрыть"><svg class="icon"><use href="icons.svg#x"></use></svg></button>
     </div>
     <div id="details-body"></div>
   </dialog>
 
-  <dialog id="editor">
-    <form id="editor-form" class="form" method="dialog">
+  <dialog id="editor" class="app-dialog">
+    <form id="editor-form" method="dialog">
       <div class="dialog-head">
-        <h2 id="editor-title"></h2>
-        <button id="editor-close" class="ghost" type="button">Отмена</button>
+        <h3 id="editor-title" class="mb-0"></h3>
+        <button id="editor-close" class="btn btn-icon btn-ghost-secondary" type="button" aria-label="Отмена"><svg class="icon"><use href="icons.svg#x"></use></svg></button>
       </div>
-      <div id="editor-body"></div>
-      <p id="editor-error" class="error"></p>
+      <div id="editor-body" class="form-grid"></div>
+      <p id="editor-error" class="text-danger mt-3 mb-0"></p>
       <div class="dialog-actions">
-        <button type="submit" id="editor-save">Сохранить</button>
+        <button type="submit" id="editor-save" class="btn btn-primary"><svg class="icon"><use href="icons.svg#check"></use></svg>Сохранить</button>
       </div>
     </form>
   </dialog>
 
-  <div id="toast" class="toast hidden" role="status"></div>
+  <div id="toast" class="toast-box hidden" role="status"></div>
 </body>
 </html>

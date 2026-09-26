@@ -1,6 +1,6 @@
 // Аналитика: периоды, динамика, справедливость по исполнителям, типы назначений, выгрузка.
 import { api } from './api.js';
-import { $, el, row, fmt, deviation, emptyRow } from './dom.js';
+import { $, el, row, fmt, deviation, emptyRow, tile } from './dom.js';
 import { lines, diverging, columns } from './charts.js';
 
 const PERIODS = ['today', '24h', '7d', '30d'];
@@ -30,18 +30,16 @@ function renderTiles(report) {
   }), { assigned: 0, weight: 0, closed: 0, returned: 0 });
   const f = report.fairness;
   const tiles = [
-    ['Назначено', fmt(t.assigned)],
-    ['Суммарный вес', fmt(t.weight)],
-    ['Решено и отклонено', fmt(t.closed)],
-    ['На доработку', fmt(t.returned)],
-    ['Среднее отклонение', f.meanAbsDeviationPercent == null ? '—' : `${fmt(f.meanAbsDeviationPercent)}%`, f.meanAbsDeviationPercent > 2],
-    ['Максимальное отклонение', f.maxAbsDeviationPercent == null ? '—' : `${fmt(f.maxAbsDeviationPercent)}%`, f.maxAbsDeviationPercent > 5],
+    ['Назначено', fmt(t.assigned), 'за выбранный период', false, 'bolt'],
+    ['Суммарный вес', fmt(t.weight), 'сложные заявки весят больше', false, 'scale'],
+    ['Решено и отклонено', fmt(t.closed), 'закрыто сотрудниками', false, 'circle-check'],
+    ['На доработку', fmt(t.returned), 'вернули клиенту за уточнением', false, 'arrow-back-up'],
+    ['Среднее отклонение', f.meanAbsDeviationPercent == null ? '—' : `${fmt(f.meanAbsDeviationPercent)}%`,
+      'от идеально ровного распределения; норма — до 2%', f.meanAbsDeviationPercent > 2, 'scale'],
+    ['Максимальное отклонение', f.maxAbsDeviationPercent == null ? '—' : `${fmt(f.maxAbsDeviationPercent)}%`,
+      'у одного сотрудника', f.maxAbsDeviationPercent > 5, 'alert-triangle'],
   ];
-  $('an-tiles').replaceChildren(...tiles.map(([name, value, warn]) => {
-    const tile = el('div', null, `tile${warn ? ' warn' : ''}`);
-    tile.append(el('div', name, 'muted'), el('div', value, 'value'));
-    return tile;
-  }));
+  $('an-tiles').replaceChildren(...tiles.map((args) => tile(...args)));
 }
 
 function renderExecutors(executors) {

@@ -50,7 +50,7 @@ function renderFields(owner, tbody) {
     return row([
       el('code', f.key), f.label, TYPE_LABEL[f.type] || f.type, optionsCell,
       f.usedByRules ? badge(String(f.usedByRules), 'ok') : '—',
-      actions(button('Изменить', () => editField(f)), button('Удалить', () => removeField(f), 'ghost small danger')),
+      actions(button('Изменить', () => editField(f), 'btn btn-sm', 'pencil'), button('Удалить', () => removeField(f), 'btn btn-sm btn-outline-danger', 'trash')),
     ]);
   }));
 }
@@ -72,7 +72,7 @@ function renderRules() {
     return row([
       toggle(r.isEnabled, (on) => saveRule(r.id, { ...ruleInput(r), isEnabled: on })),
       r.priority, r.name, condition, r.isStrict ? badge('строгое', 'warn') : '—',
-      actions(button('Изменить', () => editRule(r)), button('Удалить', () => removeRule(r), 'ghost small danger')),
+      actions(button('Изменить', () => editRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeRule(r), 'btn btn-sm btn-outline-danger', 'trash')),
     ], r.isEnabled ? '' : 'inactive');
   }));
 }
@@ -88,7 +88,7 @@ function renderWeightRules() {
     return row([
       toggle(r.isEnabled, (on) => saveWeightRule(r.id, { ...weightInput(r), isEnabled: on })),
       r.priority, condition, el('strong', fmt(r.weight)),
-      actions(button('Изменить', () => editWeightRule(r)), button('Удалить', () => removeWeightRule(r), 'ghost small danger')),
+      actions(button('Изменить', () => editWeightRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeWeightRule(r), 'btn btn-sm btn-outline-danger', 'trash')),
     ], r.isEnabled ? '' : 'inactive');
   }));
 }
@@ -134,7 +134,7 @@ function editField(existing, owner) {
   if (!isNew) key.disabled = true;
   const label = input('text', existing?.label, { maxlength: '120', required: '', placeholder: 'например, Язык обращения' });
   const type = select(Object.entries(TYPE_LABEL), existing?.type || 'String', isNew ? {} : { disabled: '' });
-  const options = el('textarea');
+  const options = el('textarea', null, 'form-control');
   options.rows = 4;
   options.maxLength = 11000;
   options.placeholder = 'по одному значению в строке или через запятую';

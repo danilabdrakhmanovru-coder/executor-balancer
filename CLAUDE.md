@@ -30,7 +30,8 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 ## Правила кода
 
 - Безопасность — требование кейса: никаких `eval`, только белый список операторов; в интерфейсе данные
-  только через `textContent`; строгая CSP (никаких inline-скриптов/стилей и CDN); изменяющие запросы
+  только через `textContent`; строгая CSP (никаких inline-скриптов/стилей и CDN; сторонние файлы — только в `wwwroot/vendor` с лицензией
+  и записью в `THIRD_PARTY_NOTICES.md`; оформление — классы Tabler, иконки — `icon()` из `dom.js` и `icons.svg`); изменяющие запросы
   администратора — с заголовком `X-Requested-With: executor-balancer`; секреты только из окружения.
 - Любое изменение Lua-скрипта — повторить в `tests/ExecutorBalancer.Tests/InMemoryLoadStore.cs`
   и прогнать `scripts/check_lua.py`.

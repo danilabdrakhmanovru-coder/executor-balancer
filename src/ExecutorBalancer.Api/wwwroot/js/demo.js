@@ -1,7 +1,7 @@
 // Демонстрация: пошаговый пульт (сфера → исполнители → поток заявок → заявка вручную)
 // и живая схема пути заявки. Управляет эмулятором АИС через балансировщик.
 import { api, problemText } from './api.js';
-import { $, el, input, field, toast, fmt, badge } from './dom.js';
+import { $, el, input, field, toast, fmt, badge, icon } from './dom.js';
 import { renderPresets } from './presets.js';
 import { attributeForm } from './forms.js';
 import { renderExplanation, KIND } from './explain.js';
@@ -14,9 +14,10 @@ let lastRunning = null;
 
 // ---------- схема пути заявки ----------
 
-function stage(number, title, value, note, cls = '') {
+function stage(number, iconName, title, value, note, cls = '') {
   const box = el('div', null, `stage ${cls}`);
-  box.append(el('span', number, 'stage-no'), el('div', title, 'stage-title'), el('div', value, 'stage-value'), el('div', note, 'stage-note'));
+  box.append(el('span', number, 'stage-no'), icon(iconName), el('div', title, 'stage-title'), el('div', value, 'stage-value'),
+    el('div', note, 'stage-note'));
   return box;
 }
 
@@ -24,31 +25,35 @@ function renderFlow(status, summary) {
   const sim = status?.simulation;
   const t = summary.totals;
   const flow = $('demo-flow');
-  const arrow = () => el('div', '→', 'stage-arrow');
+  const arrow = () => {
+    const a = el('div', null, 'stage-arrow');
+    a.append(icon('arrow-right'));
+    return a;
+  };
   flow.replaceChildren(
-    stage('1', 'Клиенты создают заявки в АИС', fmt(sim?.created ?? t.orders),
+    stage('1', 'inbox', 'Клиенты создают заявки в АИС', fmt(sim?.created ?? t.orders),
       sim?.running ? `поток ${fmt(sim.ratePerHour)} в час` : 'поток остановлен', sim?.running ? 'live' : ''),
     arrow(),
-    stage('2', 'Балансировщик выбирает исполнителя', fmt(t.assignedToday),
+    stage('2', 'route', 'Балансировщик выбирает исполнителя', fmt(t.assignedToday),
       t.pending > 0 ? `ждут подходящего: ${fmt(t.pending)}` : 'назначено сегодня, никто не ждёт', t.pending > 0 ? 'warn' : ''),
     arrow(),
-    stage('3', 'Назначение возвращается в АИС', t.undelivered > 0 ? `в пути ${fmt(t.undelivered)}` : 'всё доставлено',
+    stage('3', 'mail-forward', 'Назначение возвращается в АИС', t.undelivered > 0 ? `в пути ${fmt(t.undelivered)}` : 'всё доставлено',
       'АИС записывает его через 2–10 с'),
     arrow(),
-    stage('4', 'Исполнители работают', fmt(t.open), 'заявок сейчас в работе'),
+    stage('4', 'briefcase', 'Исполнители работают', fmt(t.open), 'заявок сейчас в работе'),
     arrow(),
-    stage('5', 'Заявки решены', fmt(t.closedToday), 'решено и отклонено сегодня'),
+    stage('5', 'circle-check', 'Заявки решены', fmt(t.closedToday), 'решено и отклонено сегодня'),
   );
 }
 
 function renderFeed(feed) {
   const list = $('demo-feed');
   if (!feed.length) {
-    list.replaceChildren(el('p', 'Назначений пока нет — запустите поток заявок или создайте заявку вручную.', 'muted'));
+    list.replaceChildren(el('div', 'Назначений пока нет — запустите поток заявок или создайте заявку вручную.', 'list-group-item text-secondary'));
     return;
   }
   list.replaceChildren(...feed.slice(0, 12).map((a) => {
-    const item = el('button', null, 'feed-item');
+    const item = el('button', null, 'list-group-item list-group-item-action feed-item');
     item.type = 'button';
     item.title = 'Почему этот исполнитель?';
     item.append(el('span', `#${a.orderId}`, 'feed-id'), el('span', a.summary || '—', 'feed-what'),

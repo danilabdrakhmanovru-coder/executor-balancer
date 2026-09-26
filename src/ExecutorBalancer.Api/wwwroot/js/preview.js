@@ -9,7 +9,7 @@ let form = null;
 export function buildPreviewForm(config) {
   form = attributeForm(config, 'Order');
   const parent = input('number', '', { min: '1', step: '1', placeholder: 'необязательно' });
-  const submit = el('button', 'Кому уйдёт заявка?');
+  const submit = el('button', 'Кому уйдёт заявка?', 'btn btn-primary w-100');
   submit.type = 'submit';
   const node = $('preview-form');
   node.replaceChildren(

@@ -1,6 +1,6 @@
 // Обзор: плитки, живой график, нагрузка исполнителей и лента назначений.
 import { api } from './api.js';
-import { $, el, row, badge, fmt, fmtTime, deviation, emptyRow } from './dom.js';
+import { $, el, row, badge, fmt, fmtTime, deviation, emptyRow, tile } from './dom.js';
 import { columns } from './charts.js';
 import { KIND, renderExplanation } from './explain.js';
 
@@ -10,22 +10,18 @@ let liveLoadedAt = 0;
 function renderTiles(t, fairness) {
   const mean = fairness?.meanAbsDeviationPercent;
   const tiles = [
-    ['Заявок всего', fmt(t.orders), 'пришло из АИС'],
-    ['В работе', fmt(t.open), 'назначены и ещё не решены'],
-    ['Ожидают исполнителя', fmt(t.pending), t.pending > 0 ? 'нет свободного подходящего — повтор каждые 5 с' : 'никто не ждёт', t.pending > 0],
-    ['Назначено за час', fmt(t.assignedLastHour), 'включая возвраты с доработки'],
-    ['Решено сегодня', fmt(t.closedToday), 'решено и отклонено'],
-    ['Не доставлено в АИС', fmt(t.undelivered), t.undelivered > 0 ? 'в очереди на отправку, с повторами' : 'все назначения у АИС', t.undelivered > 50],
-    ['Сотрудников на работе', fmt(t.activeExecutors), 'участвуют в распределении'],
+    ['Заявок всего', fmt(t.orders), 'пришло из АИС', false, 'file-text'],
+    ['В работе', fmt(t.open), 'назначены и ещё не решены', false, 'briefcase'],
+    ['Ожидают исполнителя', fmt(t.pending), t.pending > 0 ? 'нет свободного подходящего — повтор каждые 5 с' : 'никто не ждёт', t.pending > 0, 'hourglass'],
+    ['Назначено за час', fmt(t.assignedLastHour), 'включая возвраты с доработки', false, 'bolt'],
+    ['Решено сегодня', fmt(t.closedToday), 'решено и отклонено', false, 'circle-check'],
+    ['Не доставлено в АИС', fmt(t.undelivered), t.undelivered > 0 ? 'в очереди на отправку, с повторами' : 'все назначения у АИС', t.undelivered > 50, 'send'],
+    ['Сотрудников на работе', fmt(t.activeExecutors), 'участвуют в распределении', false, 'users'],
     ['Отклонение от справедливой доли', mean === null || mean === undefined ? '—' : `${fmt(mean)}%`,
       'насколько распределение за сегодня отличается от идеально ровного; норма — до 2%',
-      mean !== null && mean !== undefined && mean > 2],
+      mean !== null && mean !== undefined && mean > 2, 'scale'],
   ];
-  $('tiles').replaceChildren(...tiles.map(([label, value, hint, warn]) => {
-    const tile = el('div', null, `tile${warn ? ' warn' : ''}`);
-    tile.append(el('div', label, 'muted'), el('div', value, 'value'), el('div', hint, 'tile-hint'));
-    return tile;
-  }));
+  $('tiles').replaceChildren(...tiles.map((args) => tile(...args)));
 }
 
 function renderExecutors(executors) {

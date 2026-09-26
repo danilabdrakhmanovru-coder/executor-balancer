@@ -79,6 +79,16 @@ async function showApp() {
   show(location.hash.slice(1));
 }
 
+// тема: светлая по умолчанию (лучше читается на проекторе), выбор запоминается в браузере
+let theme = 'light';
+try { theme = localStorage.getItem('eb.theme') === 'dark' ? 'dark' : 'light'; } catch { /* приватный режим */ }
+document.documentElement.setAttribute('data-bs-theme', theme);
+$('theme').addEventListener('click', () => {
+  theme = theme === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-bs-theme', theme);
+  try { localStorage.setItem('eb.theme', theme); } catch { /* приватный режим */ }
+});
+
 onUnauthorized(showLogin);
 
 $('login-form').addEventListener('submit', async (event) => {

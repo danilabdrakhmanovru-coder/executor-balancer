@@ -16,7 +16,7 @@ export function renderExplanation(x) {
   wrap.append(el('p', meta.join(' · '), 'muted'));
   for (const note of x.notes || []) wrap.append(el('p', note, 'note'));
 
-  const table = el('table');
+  const table = el('table', null, 'table table-sm table-vcenter mt-3');
   const head = el('thead');
   head.append(row(['Исполнитель', 'Вердикт', 'Score', 'Сегодня', 'Причина']));
   const body = el('tbody');
@@ -28,7 +28,7 @@ export function renderExplanation(x) {
     body.append(row([c.name, badge(label, cls), c.score ?? '—', c.assignedToday ?? '—', el('span', c.reason || '', 'wrap-text')]));
   }
   table.append(head, body);
-  const scroll = el('div', null, 'scroll');
+  const scroll = el('div', null, 'table-responsive');
   scroll.append(table);
   wrap.append(scroll);
   wrap.append(el('p', 'Score = (открытый вес исполнителя + вес заявки) / квалификация. Выбирается минимальный; при равенстве — '

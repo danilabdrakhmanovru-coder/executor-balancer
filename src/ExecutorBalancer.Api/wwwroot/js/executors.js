@@ -10,7 +10,9 @@ let demoEnabled = false;
 export function setExecutorsEditable(enabled) { demoEnabled = enabled; }
 
 function card(e, source) {
-  const box = el('div', null, `executor${e.isActive ? '' : ' off'}`);
+  const card = el('div', null, `card executor${e.isActive ? '' : ' off'}`);
+  const box = el('div', null, 'card-body');
+  card.append(box);
   const head = el('div', null, 'executor-head');
   head.append(el('strong', e.fullName), e.isActive ? badge('на работе', 'ok') : badge('не работает', 'bad'));
   box.append(head);
@@ -34,12 +36,13 @@ function card(e, source) {
   if (demoEnabled && source) {
     const actions = el('div', null, 'row-actions');
     actions.append(
-      button(e.isActive ? 'Отправить на перерыв' : 'Вернуть на работу', () => setActive(e, !e.isActive)),
-      button('Изменить', () => edit(source)),
+      button(e.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(e, !e.isActive),
+        'btn btn-sm', e.isActive ? 'coffee' : 'user-check'),
+      button('Изменить', () => edit(source), 'btn btn-sm', 'pencil'),
     );
     box.append(actions);
   }
-  return box;
+  return card;
 }
 
 async function setActive(e, active) {
@@ -88,7 +91,7 @@ export async function refreshExecutors() {
   const byId = new Map(sources.map((s) => [s.id, s]));
   const list = $('executors-list');
   if (!summary.executors.length) {
-    const empty = el('div', null, 'card');
+    const empty = el('div', null, 'card card-body');
     empty.append(el('p', demoEnabled
       ? 'Исполнителей пока нет. Заведите их на вкладке «Демонстрация» (шаг 2) — или их передаст АИС.'
       : 'Исполнителей пока нет — их передаёт АИС.', 'muted'));
