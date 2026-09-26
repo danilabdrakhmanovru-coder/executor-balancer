@@ -20,8 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ORDER_TYPES = ["ORDER_1", "ORDER_2", "ORDER_3"]
-SUBJECTS = ["credit", "deposit", "cards", "mortgage", "insurance"]
-SEGMENTS = ["micro", "small", "medium", "large"]
+SUBJECTS = ["кредит", "вклад", "карты", "ипотека", "страхование"]
+SEGMENTS = ["микро", "малый", "средний", "крупный"]
 NAMES = ["Иванов И.", "Петрова А.", "Сидоров К.", "Галиева Р.", "Хасанов Т.", "Кузнецова Е.", "Смирнов Д.",
          "Юсупова Л.", "Абдуллин Р.", "Морозова О.", "Валиев А.", "Никитина М.", "Фёдоров С.", "Ахметова З.",
          "Попов В.", "Гарипова Э.", "Соколов П.", "Лебедева Н.", "Шарипов И.", "Козлова Ю."]
@@ -65,7 +65,7 @@ def setup_executors(ais, count, rng):
                 "order_types": ORDER_TYPES,
                 "subjects": subjects,
                 "segments": SEGMENTS,
-                "client_classes": ["standard", "vip"] if vip else ["standard"],
+                "client_classes": ["обычный", "VIP"] if vip else ["обычный"],
             },
         })
     print(f"Заведено исполнителей: {count}")
@@ -77,7 +77,7 @@ def random_order(rng, recent):
         "order_type": rng.choice(ORDER_TYPES),
         "subject": rng.choice(SUBJECTS),
         "client_segment": rng.choice(SEGMENTS),
-        "client_class": "vip" if rng.random() < 0.08 else "standard",
+        "client_class": "VIP" if rng.random() < 0.08 else "обычный",
     }}
     if recent and rng.random() < 0.08:
         order["parentId"] = rng.choice(recent)

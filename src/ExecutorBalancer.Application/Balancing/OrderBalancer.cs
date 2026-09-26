@@ -284,7 +284,7 @@ public sealed class OrderBalancer(
             explanation.Kind = AssignmentKind.Primary.ToString();
             explanation.ChosenExecutorId = best.Id;
             explanation.ChosenScore = explanation.Candidates.First(c => c.ExecutorId == best.Id).Score;
-            explanation.Decision = $"{best.FullName}: минимальная взвешенная нагрузка {explanation.ChosenScore} среди подходящих";
+            explanation.Decision = $"{best.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})";
         }
         else if (explanation.ChosenExecutorId is null)
         {
@@ -398,7 +398,7 @@ public sealed class OrderBalancer(
         {
             AssignmentKind.Parent => $"{chosen.FullName} ведёт родительскую заявку #{order.ParentId}",
             AssignmentKind.Secondary => $"{chosen.FullName} уже работал с этой заявкой",
-            _ => $"{chosen.FullName}: минимальная взвешенная нагрузка {explanation.ChosenScore} среди подходящих",
+            _ => $"{chosen.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})",
         };
         MarkChosen(explanation, executorId);
 

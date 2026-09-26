@@ -68,11 +68,11 @@ public class PresetTests : IAsyncLifetime
             await c.ApplyPresetAsync("logistics", CancellationToken.None);
             return true;
         });
-        await _f.AddExecutor(1, extra: new { regions = new[] { "ufa" }, max_cargo_weight = 300, cargo_types = new[] { "standard" } });
-        await _f.AddExecutor(2, extra: new { regions = new[] { "ufa", "kazan" }, max_cargo_weight = 5000, cargo_types = new[] { "standard", "dangerous" } });
+        await _f.AddExecutor(1, extra: new { regions = new[] { "Уфа" }, max_cargo_weight = 300, cargo_types = new[] { "обычный" } });
+        await _f.AddExecutor(2, extra: new { regions = new[] { "Уфа", "Казань" }, max_cargo_weight = 5000, cargo_types = new[] { "обычный", "опасный" } });
 
-        var heavy = await _f.Receive(1, attributes: new { region = "ufa", cargo_weight = 800, cargo_type = "standard", urgency = "standard" });
-        var dangerous = await _f.Receive(2, attributes: new { region = "kazan", cargo_weight = 10, cargo_type = "dangerous", urgency = "express" });
+        var heavy = await _f.Receive(1, attributes: new { region = "Уфа", cargo_weight = 800, cargo_type = "обычный", urgency = "обычная" });
+        var dangerous = await _f.Receive(2, attributes: new { region = "Казань", cargo_weight = 10, cargo_type = "опасный", urgency = "экспресс" });
 
         Assert.Equal(2, heavy.ExecutorId);
         Assert.Equal(2, dangerous.ExecutorId);

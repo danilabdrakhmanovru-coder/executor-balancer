@@ -18,7 +18,7 @@ export function renderExplanation(x) {
 
   const table = el('table', null, 'table table-sm table-vcenter mt-3');
   const head = el('thead');
-  head.append(row(['Исполнитель', 'Вердикт', 'Score', 'Сегодня', 'Причина']));
+  head.append(row(['Сотрудник', 'Решение', 'Оценка', 'Сегодня', 'Почему']));
   const body = el('tbody');
   const order = { chosen: 0, eligible: 1, matched: 1, daily_limit_exceeded: 2, rule_failed: 3, inactive: 4 };
   const sorted = [...(x.candidates || [])].sort((a, b) =>
@@ -31,7 +31,7 @@ export function renderExplanation(x) {
   const scroll = el('div', null, 'table-responsive');
   scroll.append(table);
   wrap.append(scroll);
-  wrap.append(el('p', 'Score = (открытый вес исполнителя + вес заявки) / квалификация. Выбирается минимальный; при равенстве — '
-    + 'меньше назначений за сутки на единицу квалификации, затем меньший id.', 'hint'));
+  wrap.append(el('p', 'Оценка = (вес заявок в работе у сотрудника + вес этой заявки) / его квалификация — то есть нагрузка после назначения. Выбирается наименьшая; при равенстве — '
+    + 'меньше назначений за сутки на единицу квалификации, затем меньший номер сотрудника.', 'hint'));
   return wrap;
 }

@@ -100,15 +100,15 @@ internal sealed class BalancerFixture : IAsyncDisposable
                     min_sum = 0,
                     max_sum = 10_000_000,
                     order_types = new[] { "ORDER_1", "ORDER_2", "ORDER_3" },
-                    subjects = subjects ?? new[] { "credit", "deposit", "cards", "mortgage", "insurance" },
-                    segments = new[] { "micro", "small", "medium", "large" },
-                    client_classes = new[] { "standard", "vip" },
+                    subjects = subjects ?? new[] { "кредит", "вклад", "карты", "ипотека", "страхование" },
+                    segments = new[] { "микро", "малый", "средний", "крупный" },
+                    client_classes = new[] { "обычный", "VIP" },
                 }), extra)), CancellationToken.None);
             return true;
         });
 
-    public static object DefaultOrder(string subject = "credit", decimal sum = 50_000, string clientClass = "standard") =>
-        new { sum, order_type = "ORDER_1", subject, client_segment = "small", client_class = clientClass };
+    public static object DefaultOrder(string subject = "кредит", decimal sum = 50_000, string clientClass = "обычный") =>
+        new { sum, order_type = "ORDER_1", subject, client_segment = "малый", client_class = clientClass };
 
     public static Dictionary<string, JsonElement> Attributes(object value) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(value))!;
