@@ -48,6 +48,13 @@ public static class AdminEndpoints
         group.MapDelete("/weight-rules/{id:int}", async (int id, ConfigurationService config, CancellationToken ct) =>
             await config.DeleteWeightRuleAsync(id, ct) ? Results.NoContent() : NotFound());
 
+        group.MapGet("/presets", (ConfigurationService config, CancellationToken ct) => config.GetPresetsAsync(ct));
+        group.MapPost("/presets/{id}/apply", async (string id, ConfigurationService config, CancellationToken ct) =>
+        {
+            await config.ApplyPresetAsync(id, ct);
+            return Results.NoContent();
+        });
+
         group.MapPost("/preview", Preview);
         group.MapGet("/audit", (long? before, int? limit, ConfigurationService config, CancellationToken ct) =>
             config.GetAuditAsync(before, limit ?? 100, ct));

@@ -80,3 +80,6 @@ public sealed class ConfigurationConflictException(string message) : Exception(m
 
 public sealed record AuditView(long Id, string Actor, string Action, string Entity, string EntityId, JsonElement? Data,
     DateTimeOffset CreatedAt);
+
+public sealed record PresetView(string Id, string Title, string Description, string[] OrderFields, string[] ExecutorFields,
+    bool IsCurrent);

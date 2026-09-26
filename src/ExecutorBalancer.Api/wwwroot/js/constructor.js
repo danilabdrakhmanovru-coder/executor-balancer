@@ -1,6 +1,7 @@
 // Конструктор: параметры заявки и исполнителя, правила подбора, правила веса.
 // Интерфейс подсказывает допустимые сочетания, но окончательная проверка — на сервере.
 import { api, problemText } from './api.js';
+import { openEditor as openShared } from './editor.js';
 import { $, el, row, badge, button, actions, fmt, toast, field, input, select, checkbox, emptyRow } from './dom.js';
 
 const TYPE_LABEL = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
@@ -49,7 +50,7 @@ function renderFields(owner, tbody) {
     return row([
       el('code', f.key), f.label, TYPE_LABEL[f.type] || f.type, optionsCell,
       f.usedByRules ? badge(String(f.usedByRules), 'ok') : '—',
-      actions(button('Изменить', () => editField(f)), button('Удалить', () => removeField(f), 'ghost small danger')),
+      actions(button('Изменить', () => editField(f), 'btn btn-sm', 'pencil'), button('Удалить', () => removeField(f), 'btn btn-sm btn-outline-danger', 'trash')),
     ]);
   }));
 }
@@ -71,7 +72,7 @@ function renderRules() {
     return row([
       toggle(r.isEnabled, (on) => saveRule(r.id, { ...ruleInput(r), isEnabled: on })),
       r.priority, r.name, condition, r.isStrict ? badge('строгое', 'warn') : '—',
-      actions(button('Изменить', () => editRule(r)), button('Удалить', () => removeRule(r), 'ghost small danger')),
+      actions(button('Изменить', () => editRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeRule(r), 'btn btn-sm btn-outline-danger', 'trash')),
     ], r.isEnabled ? '' : 'inactive');
   }));
 }
@@ -87,7 +88,7 @@ function renderWeightRules() {
     return row([
       toggle(r.isEnabled, (on) => saveWeightRule(r.id, { ...weightInput(r), isEnabled: on })),
       r.priority, condition, el('strong', fmt(r.weight)),
-      actions(button('Изменить', () => editWeightRule(r)), button('Удалить', () => removeWeightRule(r), 'ghost small danger')),
+      actions(button('Изменить', () => editWeightRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeWeightRule(r), 'btn btn-sm btn-outline-danger', 'trash')),
     ], r.isEnabled ? '' : 'inactive');
   }));
 }
@@ -104,32 +105,8 @@ export function currentConfig() { return config; }
 
 // ---------- диалог ----------
 
-let submitHandler = null;
-
 function openEditor(title, nodes, onSubmit) {
-  $('editor-title').textContent = title;
-  $('editor-body').replaceChildren(...nodes);
-  $('editor-error').textContent = '';
-  submitHandler = onSubmit;
-  $('editor').showModal();
-}
-
-async function submitEditor(event) {
-  event.preventDefault();
-  if (!submitHandler) return;
-  const save = $('editor-save');
-  save.disabled = true;
-  $('editor-error').textContent = '';
-  try {
-    await submitHandler();
-    $('editor').close();
-    await refreshConstructor();
-    onChanged();
-  } catch (e) {
-    $('editor-error').textContent = e instanceof Error && !('status' in e) ? e.message : problemText(e);
-  } finally {
-    save.disabled = false;
-  }
+  openShared(title, nodes, onSubmit, async () => { await refreshConstructor(); onChanged(); });
 }
 
 async function mutate(promise, success) {
@@ -157,7 +134,7 @@ function editField(existing, owner) {
   if (!isNew) key.disabled = true;
   const label = input('text', existing?.label, { maxlength: '120', required: '', placeholder: 'например, Язык обращения' });
   const type = select(Object.entries(TYPE_LABEL), existing?.type || 'String', isNew ? {} : { disabled: '' });
-  const options = el('textarea');
+  const options = el('textarea', null, 'form-control');
   options.rows = 4;
   options.maxLength = 11000;
   options.placeholder = 'по одному значению в строке или через запятую';
@@ -445,6 +422,4 @@ export function initConstructor(changed) {
   }
   $('add-rule').addEventListener('click', () => editRule(null));
   $('add-weight-rule').addEventListener('click', () => editWeightRule(null));
-  $('editor-form').addEventListener('submit', submitEditor);
-  $('editor-close').addEventListener('click', () => $('editor').close());
 }

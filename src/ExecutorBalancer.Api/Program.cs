@@ -26,6 +26,7 @@ builder.Services.Configure<JsonOptions>(options =>
     options.SerializerOptions.MaxDepth = 16;
 });
 
+builder.Services.AddOptions<DemoOptions>().Bind(builder.Configuration.GetSection(DemoOptions.Section));
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi(options => options.AddDocumentTransformer<ApiKeyOpenApiTransformer>());
 builder.Services.AddBalancerRateLimits();
@@ -57,6 +58,7 @@ app.MapIntegrationEndpoints();
 app.MapAuthEndpoints();
 app.MapDashboardEndpoints();
 app.MapAdminEndpoints();
+app.MapDemoEndpoints();
 
 app.Run();
 

@@ -45,6 +45,8 @@ services:
       Ais__BaseUrl: http://ais:8080
       Ais__ApiKey: ${AIS_API_KEY:?задайте AIS_API_KEY в .env}
       Swagger__Enabled: ${SWAGGER_ENABLED:-false}
+      # пульт демонстрации: управление эмулятором АИС из интерфейса; в бою — false
+      Demo__Enabled: ${DEMO_ENABLED:-true}
     ports:
       - "127.0.0.1:8080:8080"
     read_only: true
