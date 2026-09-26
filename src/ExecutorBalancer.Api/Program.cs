@@ -42,7 +42,12 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // браузер сверяется с сервером при каждой загрузке (ответ 304, если файл не менялся):
+    // после обновления сервиса старый JS из кэша не смешивается с новой страницей
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
+});
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
