@@ -2,6 +2,7 @@ using System.Text.Json;
 using ExecutorBalancer.Api.Contracts;
 using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application;
+using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,11 @@ public static class IntegrationEndpoints
         group.MapPost("/orders/{id:long}/status", ChangeStatus);
         group.MapGet("/orders/{id:long}/assignment", GetAssignment);
         group.MapPut("/executors/{id:long}", UpsertExecutor);
+        // метрики дашборда для внешних систем — тот же отчёт, что в разделе «Аналитика»
+        group.MapGet("/metrics", async (string? period, AnalyticsService analytics, CancellationToken ct) =>
+            DashboardEndpoints.TryParsePeriod(period, out var parsed)
+                ? Results.Ok(await analytics.BuildAsync(parsed, ct))
+                : DashboardEndpoints.BadPeriod());
         return app;
     }
 

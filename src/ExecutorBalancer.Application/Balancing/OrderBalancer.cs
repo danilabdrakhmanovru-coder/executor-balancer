@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Rules;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,12 @@ public sealed class OrderBalancer(
     ILogger<OrderBalancer> logger)
 {
     private const string WaitingReason = "ожидает распределения";
+
+    /// <summary>
+    /// Выбор в Redis и запись в базу занимают миллисекунды. Если заявка числится за исполнителем в Redis
+    /// дольше, а в базе исполнителя нет — процесс упал между этими шагами, и выбор надо откатить.
+    /// </summary>
+    private static readonly TimeSpan OrphanedHoldAge = TimeSpan.FromMinutes(1);
 
     private readonly TimeZoneInfo _timeZone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
 
@@ -93,10 +100,27 @@ public sealed class OrderBalancer(
         }
 
         var previousStatus = order.Status;
+        var now = clock.GetUtcNow();
         order.Status = status;
-        order.ClosedAt = status is OrderStatus.Accept or OrderStatus.Reject ? clock.GetUtcNow() : null;
+        order.ClosedAt = status is OrderStatus.Accept or OrderStatus.Reject ? now : null;
         order.PendingReason = status == OrderStatus.Processed ? WaitingReason : null;
-        await db.SaveChangesAsync(cancellationToken);
+
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            if (order.ExecutorId is { } owner)
+            {
+                var closed = status is OrderStatus.Accept or OrderStatus.Reject;
+                var returned = previousStatus == OrderStatus.Processed && status == OrderStatus.Await;
+                if (closed || returned)
+                {
+                    await ExecutorStats.RecordAsync(db, now,
+                        [new StatDelta(owner, Closed: closed ? 1 : 0, Returned: returned ? 1 : 0)], cancellationToken);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         if (status != OrderStatus.Processed)
         {
@@ -190,10 +214,97 @@ public sealed class OrderBalancer(
     public DateOnly Today() =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.GetUtcNow(), _timeZone).DateTime);
 
-    private async Task<BalanceResult> AssignAsync(Order order, IReadOnlyDictionary<string, FieldValue> values,
-        BalancerSnapshot snapshot, long? previousExecutorId, bool reopen, CancellationToken cancellationToken)
+    /// <summary>
+    /// Пробная проверка из конструктора: кому ушла бы заявка с такими параметрами прямо сейчас и почему.
+    /// Ничего не назначает и не меняет счётчики.
+    /// </summary>
+    public async Task<AssignmentExplanation> PreviewAsync(long? parentId,
+        IReadOnlyDictionary<string, JsonElement> attributes, CancellationToken cancellationToken)
     {
-        var explanation = new AssignmentExplanation { OrderWeight = order.Weight };
+        var snapshot = await directory.GetAsync(cancellationToken);
+        var errors = new Dictionary<string, string[]>();
+        var values = snapshot.Catalog.Parse(FieldOwner.Order, attributes, errors);
+        if (errors.Count > 0)
+        {
+            throw new InvalidInputException(errors);
+        }
+
+        var explanation = new AssignmentExplanation { OrderWeight = snapshot.OrderWeight(values) };
+        var matching = MatchCandidates(snapshot, values, explanation);
+        var loads = await loadStore.GetLoadsAsync(Today(), cancellationToken);
+        var weight = LoadMath.ToMilli(explanation.OrderWeight);
+
+        if (parentId is { } id)
+        {
+            var parentExecutorId = await db.Orders.AsNoTracking()
+                .Where(o => o.Id == id)
+                .Select(o => o.ExecutorId)
+                .FirstOrDefaultAsync(cancellationToken);
+            var parentExecutor = matching.FirstOrDefault(e => e.Id == parentExecutorId);
+            if (parentExecutor is not null)
+            {
+                explanation.Kind = AssignmentKind.Parent.ToString();
+                explanation.ChosenExecutorId = parentExecutor.Id;
+                explanation.Decision = $"{parentExecutor.FullName} ведёт родительскую заявку #{id} — суточный лимит не учитывается";
+            }
+            else
+            {
+                explanation.Notes.Add(parentExecutorId is null
+                    ? $"у родительской заявки #{id} нет исполнителя — обычный выбор"
+                    : $"исполнитель родительской заявки #{id} неактивен или не подходит — обычный выбор");
+            }
+        }
+
+        ExecutorProfile? best = null;
+        ExecutorLoad? bestLoad = null;
+        foreach (var executor in matching)
+        {
+            var load = loads.GetValueOrDefault(executor.Id) ?? new ExecutorLoad(0, 0, 0);
+            if (executor.DailyLimit is { } limit && load.AssignedToday >= limit)
+            {
+                explanation.Candidates.Add(new(executor.Id, executor.FullName, "daily_limit_exceeded",
+                    $"исчерпан суточный лимит ({load.AssignedToday} из {limit})", null, load.AssignedToday));
+                continue;
+            }
+
+            var qualification = LoadMath.ToMilli(executor.QualificationWeight);
+            explanation.Candidates.Add(new(executor.Id, executor.FullName, "eligible", null,
+                LoadMath.Score(load.OpenWeightMilli, weight, qualification), load.AssignedToday));
+            if (best is null || LoadMath.IsBetter(weight,
+                    load.OpenWeightMilli, qualification, load.AssignedToday, executor.Id,
+                    bestLoad!.OpenWeightMilli, LoadMath.ToMilli(best.QualificationWeight), bestLoad.AssignedToday, best.Id))
+            {
+                best = executor;
+                bestLoad = load;
+            }
+        }
+
+        if (explanation.ChosenExecutorId is null && best is not null)
+        {
+            explanation.Kind = AssignmentKind.Primary.ToString();
+            explanation.ChosenExecutorId = best.Id;
+            explanation.ChosenScore = explanation.Candidates.First(c => c.ExecutorId == best.Id).Score;
+            explanation.Decision = $"{best.FullName}: минимальная взвешенная нагрузка {explanation.ChosenScore} среди подходящих";
+        }
+        else if (explanation.ChosenExecutorId is null)
+        {
+            explanation.Decision = matching.Count == 0
+                ? "нет активного исполнителя, подходящего по параметрам — заявка будет ждать"
+                : "у подходящих исполнителей исчерпан суточный лимит — заявка будет ждать";
+        }
+
+        if (explanation.ChosenExecutorId is { } chosen)
+        {
+            MarkChosen(explanation, chosen);
+        }
+
+        return explanation;
+    }
+
+    /// <summary>Отбор по активности и правилам конструктора; отсеянные сразу попадают в объяснение.</summary>
+    private static List<ExecutorProfile> MatchCandidates(BalancerSnapshot snapshot,
+        IReadOnlyDictionary<string, FieldValue> values, AssignmentExplanation explanation)
+    {
         var matching = new List<ExecutorProfile>();
         foreach (var executor in snapshot.Executors.Values.OrderBy(e => e.Id))
         {
@@ -212,6 +323,16 @@ public sealed class OrderBalancer(
 
             matching.Add(executor);
         }
+
+        return matching;
+    }
+
+    private async Task<BalanceResult> AssignAsync(Order order, IReadOnlyDictionary<string, FieldValue> values,
+        BalancerSnapshot snapshot, long? previousExecutorId, bool reopen, CancellationToken cancellationToken,
+        bool orphanReleased = false)
+    {
+        var explanation = new AssignmentExplanation { OrderWeight = order.Weight };
+        var matching = MatchCandidates(snapshot, values, explanation);
 
         var weight = LoadMath.ToMilli(order.Weight);
         var day = Today();
@@ -243,6 +364,18 @@ public sealed class OrderBalancer(
 
         if (pick.Status == PickStatus.AlreadyAssigned)
         {
+            if (order.ExecutorId is null && !orphanReleased && IsOrphaned(pick))
+            {
+                // Redis держит заявку, а решения в базе нет: без отката заявка ждала бы вечно,
+                // а исполнитель числился бы загруженным
+                logger.LogWarning(
+                    "Заявка {OrderId} с {HeldSince} числится за исполнителем {ExecutorId} только в Redis — откатываем и распределяем заново",
+                    order.Id, pick.HeldSince, pick.ExecutorId);
+                await loadStore.ReleaseAsync(order.Id, LoadRelease.Rollback, cancellationToken);
+                return await AssignAsync(order, values, snapshot, previousExecutorId, reopen, cancellationToken,
+                    orphanReleased: true);
+            }
+
             return new BalanceResult(order.Id, BalanceOutcome.Assigned, pick.ExecutorId, null, null, Duplicate: true);
         }
 
@@ -305,6 +438,14 @@ public sealed class OrderBalancer(
             order.AssignedAt = now;
             order.PendingReason = null;
             await db.SaveChangesAsync(cancellationToken);
+            await ExecutorStats.RecordAsync(db, now, StatDeltas(kind, executorId, order.Weight), cancellationToken);
+            if (kind is AssignmentKind.Primary or AssignmentKind.Reassign)
+            {
+                // кто мог получить эту заявку: по этим группам считается эталон справедливого распределения
+                await ExecutorStats.RecordEligibilityAsync(db, now,
+                    pick.Report.Where(r => r.Verdict == "eligible").Select(r => r.ExecutorId), order.Weight,
+                    cancellationToken);
+            }
             await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception ex)
@@ -350,6 +491,24 @@ public sealed class OrderBalancer(
         }
 
         return null;
+    }
+
+    private bool IsOrphaned(PickResult pick) =>
+        pick.HeldSince is { } since && clock.GetUtcNow() - since > OrphanedHoldAge;
+
+    /// <summary>Показатели решения; заявки от родителя и вторичные — не свободный выбор.</summary>
+    private static StatDelta[] StatDeltas(AssignmentKind kind, long executorId, decimal orderWeight)
+    {
+        var free = kind is AssignmentKind.Primary or AssignmentKind.Reassign;
+        return
+        [
+            new(executorId, Assigned: 1, AssignedWeight: orderWeight,
+                Primary: kind == AssignmentKind.Primary ? 1 : 0,
+                Reassign: kind == AssignmentKind.Reassign ? 1 : 0,
+                Parent: kind == AssignmentKind.Parent ? 1 : 0,
+                Secondary: kind == AssignmentKind.Secondary ? 1 : 0,
+                FreeWeight: free ? orderWeight : 0),
+        ];
     }
 
     private static void AddLoadReport(AssignmentExplanation explanation, PickResult pick,

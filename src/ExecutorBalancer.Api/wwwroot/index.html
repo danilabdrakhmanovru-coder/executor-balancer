@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Executor Balancer</title>
   <link rel="stylesheet" href="app.css">
-  <script src="app.js" defer></script>
+  <script type="module" src="js/main.js"></script>
 </head>
 <body>
   <section id="login" class="login hidden">
     <form id="login-form" class="card login-card">
       <h1>Executor Balancer</h1>
       <p class="muted">Вход администратора</p>
-      <input id="password" type="password" autocomplete="current-password" placeholder="Пароль" required>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Пароль" required maxlength="200">
       <button type="submit">Войти</button>
       <p id="login-error" class="error"></p>
     </form>
@@ -20,49 +20,196 @@
 
   <main id="app" class="hidden">
     <header class="topbar">
-      <div>
+      <div class="brand">
         <h1>Executor Balancer</h1>
         <span class="muted">распределение заявок в реальном времени</span>
       </div>
+      <nav class="tabs" id="tabs">
+        <button data-tab="overview" class="tab">Обзор</button>
+        <button data-tab="analytics" class="tab">Аналитика</button>
+        <button data-tab="constructor" class="tab">Конструктор</button>
+        <button data-tab="preview" class="tab">Проверка заявки</button>
+        <button data-tab="audit" class="tab">Журнал</button>
+      </nav>
       <div class="topbar-right">
         <span id="updated" class="muted"></span>
         <button id="logout" class="ghost">Выйти</button>
       </div>
     </header>
 
-    <section class="tiles" id="tiles"></section>
-    <p id="rule-errors" class="error"></p>
-
-    <section class="grid">
+    <!-- Обзор -->
+    <section id="tab-overview" class="tab-page">
+      <section class="tiles" id="tiles"></section>
+      <p id="rule-errors" class="error"></p>
       <div class="card">
         <div class="card-head">
-          <h2>Исполнители</h2>
-          <span class="muted">полоса — нагрузка на единицу квалификации</span>
+          <h2>Назначения по минутам</h2>
+          <span class="muted">последние 30 минут</span>
         </div>
+        <div id="live-chart" class="chart chart-small"></div>
+      </div>
+      <section class="grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Исполнители</h2>
+            <span class="muted">полоса — открытый вес на единицу квалификации</span>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead>
+                <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th>Сегодня / лимит</th><th title="Отклонение от справедливой доли за сегодня">Откл.</th></tr>
+              </thead>
+              <tbody id="executors"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Лента назначений</h2>
+            <form id="lookup" class="lookup">
+              <input id="lookup-id" type="number" min="1" placeholder="№ заявки">
+              <button type="submit" class="ghost">Найти</button>
+            </form>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th>Score</th></tr></thead>
+              <tbody id="feed"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- Аналитика -->
+    <section id="tab-analytics" class="tab-page hidden">
+      <div class="toolbar">
+        <div class="segmented" id="period">
+          <button data-period="today">Сегодня</button>
+          <button data-period="24h">24 часа</button>
+          <button data-period="7d">7 дней</button>
+          <button data-period="30d">30 дней</button>
+        </div>
+        <a id="export" class="button ghost" href="/api/dashboard/export.csv?period=today" download>Выгрузить в Excel (CSV)</a>
+      </div>
+      <section class="tiles" id="an-tiles"></section>
+      <div class="card">
+        <div class="card-head">
+          <h2>Динамика</h2>
+          <span class="legend"><i class="dot series-a"></i>назначено <i class="dot series-b"></i>решено и отклонено <i class="dot series-c"></i>на доработку</span>
+        </div>
+        <div id="an-timeline" class="chart"></div>
+      </div>
+      <section class="grid grid-even">
+        <div class="card">
+          <div class="card-head">
+            <h2>Отклонение от справедливой доли</h2>
+            <span class="muted">норма — в пределах ±2%</span>
+          </div>
+          <div id="an-deviation" class="chart"></div>
+          <p class="hint">Справедливый вес — идеально выровненное распределение того же потока заявок: нагрузка на единицу
+            квалификации как можно ровнее с учётом того, кто какие заявки мог взять и кто в это время работал.
+            Заявки от родителя и вторичные обязаны идти «своему» исполнителю — они учитываются как уже занятая часть нагрузки.</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Типы назначений</h2></div>
+          <div id="an-kinds" class="chart chart-small"></div>
+        </div>
+      </section>
+      <div class="card">
+        <div class="card-head"><h2>По исполнителям</h2></div>
         <div class="scroll">
           <table>
             <thead>
-              <tr><th>Исполнитель</th><th>Квал.</th><th>В работе</th><th>Вес</th><th class="wide">Относительная нагрузка</th><th>Сегодня / лимит</th></tr>
+              <tr><th>Исполнитель</th><th>Квал.</th><th>Назначено</th><th>Вес</th><th title="Вес заявок, где исполнителя выбирал алгоритм">Свободный выбор</th><th title="Вес при идеально ровном распределении">Справедливый вес</th><th>Откл., %</th><th>Решено</th><th>На доработку</th><th>Возвраты, %</th></tr>
             </thead>
-            <tbody id="executors"></tbody>
+            <tbody id="an-executors"></tbody>
           </table>
         </div>
       </div>
+    </section>
 
+    <!-- Конструктор -->
+    <section id="tab-constructor" class="tab-page hidden">
+      <p class="hint">Изменения применяются сразу, без перезапуска: следующая заявка распределяется уже по новым правилам.
+        Каждое изменение проверяется по типам параметров и записывается в журнал.</p>
+      <section class="stack">
+        <div class="card">
+          <div class="card-head">
+            <h2>Параметры заявки</h2>
+            <button class="ghost" data-add-field="Order">+ Параметр</button>
+          </div>
+          <div class="scroll"><table>
+            <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
+            <tbody id="fields-order"></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Параметры исполнителя</h2>
+            <button class="ghost" data-add-field="Executor">+ Параметр</button>
+          </div>
+          <div class="scroll"><table>
+            <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
+            <tbody id="fields-executor"></tbody>
+          </table></div>
+        </div>
+      </section>
       <div class="card">
         <div class="card-head">
-          <h2>Лента назначений</h2>
-          <form id="lookup" class="lookup">
-            <input id="lookup-id" type="number" min="1" placeholder="№ заявки">
-            <button type="submit" class="ghost">Найти</button>
-          </form>
+          <h2>Правила подбора</h2>
+          <button id="add-rule">+ Правило</button>
         </div>
-        <div class="scroll">
-          <table>
-            <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th>Score</th></tr></thead>
-            <tbody id="feed"></tbody>
-          </table>
+        <p class="hint">Исполнитель подходит, если выполнены все включённые правила. Пустое значение не ограничивает выбор,
+          если правило не строгое.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Вкл.</th><th>Приоритет</th><th>Название</th><th>Условие</th><th>Строгое</th><th></th></tr></thead>
+          <tbody id="rules"></tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Вес заявки</h2>
+          <button id="add-weight-rule">+ Правило веса</button>
         </div>
+        <p class="hint" id="weight-hint"></p>
+        <div class="scroll"><table>
+          <thead><tr><th>Вкл.</th><th>Приоритет</th><th>Условие</th><th>Вес</th><th></th></tr></thead>
+          <tbody id="weight-rules"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- Проверка заявки -->
+    <section id="tab-preview" class="tab-page hidden">
+      <section class="grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Параметры заявки</h2>
+            <button id="preview-sample" class="ghost" type="button">Заполнить примером</button>
+          </div>
+          <p class="hint">Проверка ничего не назначает: показывает, кому ушла бы такая заявка прямо сейчас и почему.</p>
+          <form id="preview-form" class="form"></form>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Результат</h2></div>
+          <div id="preview-result"><p class="muted">Заполните параметры и нажмите «Кому уйдёт заявка?».</p></div>
+        </div>
+      </section>
+    </section>
+
+    <!-- Журнал -->
+    <section id="tab-audit" class="tab-page hidden">
+      <div class="card">
+        <div class="card-head">
+          <h2>Журнал изменений и входов</h2>
+          <button id="audit-refresh" class="ghost">Обновить</button>
+        </div>
+        <div class="scroll tall"><table>
+          <thead><tr><th>Время</th><th>Событие</th><th>Объект</th><th>Подробности</th></tr></thead>
+          <tbody id="audit"></tbody>
+        </table></div>
+        <button id="audit-more" class="ghost more hidden">Показать ещё</button>
       </div>
     </section>
   </main>
@@ -70,9 +217,25 @@
   <dialog id="details">
     <div class="dialog-head">
       <h2 id="details-title"></h2>
-      <button id="details-close" class="ghost">Закрыть</button>
+      <button id="details-close" class="ghost" type="button">Закрыть</button>
     </div>
     <div id="details-body"></div>
   </dialog>
+
+  <dialog id="editor">
+    <form id="editor-form" class="form" method="dialog">
+      <div class="dialog-head">
+        <h2 id="editor-title"></h2>
+        <button id="editor-close" class="ghost" type="button">Отмена</button>
+      </div>
+      <div id="editor-body"></div>
+      <p id="editor-error" class="error"></p>
+      <div class="dialog-actions">
+        <button type="submit" id="editor-save">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
 </body>
 </html>

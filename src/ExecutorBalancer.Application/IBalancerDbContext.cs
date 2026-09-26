@@ -14,6 +14,8 @@ public interface IBalancerDbContext
     DbSet<WeightRule> WeightRules { get; }
     DbSet<OutboxMessage> OutboxMessages { get; }
     DbSet<AuditEntry> AuditEntries { get; }
+    DbSet<ExecutorHourStat> ExecutorHourStats { get; }
+    DbSet<EligibilityHourStat> EligibilityHourStats { get; }
 
     DatabaseFacade Database { get; }
 

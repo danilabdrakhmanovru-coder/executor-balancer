@@ -75,7 +75,7 @@ public static class RequestValidation
                && Enum.IsDefined(status);
     }
 
-    private static void ValidateAttributes(Dictionary<string, JsonElement>? attributes, Dictionary<string, string[]> errors)
+    public static void ValidateAttributes(Dictionary<string, JsonElement>? attributes, Dictionary<string, string[]> errors)
     {
         if (attributes is null)
         {

@@ -32,8 +32,14 @@ assert P(2,1000,[(3,1000,-1)])[0]=='existing'           # без reopen не п�
 t=P(2,1000,[(3,1000,-1)],reopen=1); assert t[0]=='assigned', t
 assert P(2,1000,[(3,1000,-1)],reopen=1)[0]=='existing'   # уже открыта
 assert R(2,'closed')==1 and r.ttl("{eb}:order:2")>0
-# rollback deletes
-t=P(9,1500,[(3,1000,-1)]); assert R(9,'rolled-back',1)==1 and not r.exists("{eb}:order:9")
+# rollback deletes the order and returns the daily slot
+daily_before=int(r.hget("{eb}:daily:20260928",3))
+t=P(9,1500,[(3,1000,-1)]); assert t[0]=='assigned' and t[2].isdigit(), t
+assert int(r.hget("{eb}:daily:20260928",3))==daily_before+1
+assert R(9,'rolled-back',1)==1 and not r.exists("{eb}:order:9")
+assert int(r.hget("{eb}:daily:20260928",3))==daily_before
+# existing returns executor and hold time
+e=P(2,1000,[(3,1000,-1)]); assert e[0]=='existing' and e[1]=='3' and e[2].isdigit(), e
 print("loads",r.hgetall("{eb}:open-weight"),r.hgetall("{eb}:open-count"))
 assert r.hget("{eb}:open-weight",3)=='1000' and r.hget("{eb}:open-count",3)=='1'
 # concurrency: 8 clients, 4000 orders sent twice, limit 300 on exec 1

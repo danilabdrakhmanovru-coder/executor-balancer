@@ -1,6 +1,8 @@
 using System.Text.Json;
 using ExecutorBalancer.Application;
+using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
+using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Domain;
 using ExecutorBalancer.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
@@ -63,6 +65,18 @@ internal sealed class BalancerFixture : IAsyncDisposable
         return await action(scope.ServiceProvider.GetRequiredService<OrderBalancer>());
     }
 
+    public async Task<T> Config<T>(Func<ConfigurationService, Task<T>> action)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await action(scope.ServiceProvider.GetRequiredService<ConfigurationService>());
+    }
+
+    public async Task<AnalyticsReport> Analytics(AnalyticsPeriod period = AnalyticsPeriod.Today)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<AnalyticsService>().BuildAsync(period, CancellationToken.None);
+    }
+
     public async Task<T> Query<T>(Func<IBalancerDbContext, Task<T>> action)
     {
         await using var scope = _services.CreateAsyncScope();
@@ -77,11 +91,11 @@ internal sealed class BalancerFixture : IAsyncDisposable
         Run(b => b.ChangeStatusAsync(id, status, CancellationToken.None));
 
     public Task AddExecutor(long id, decimal qualification = 1m, int? dailyLimit = null, bool active = true,
-        string[]? subjects = null) =>
+        string[]? subjects = null, object? extra = null) =>
         Run(async b =>
         {
             await b.UpsertExecutorAsync(new IncomingExecutor(id, $"Исполнитель {id}", active, dailyLimit, qualification,
-                Attributes(new
+                Merge(Attributes(new
                 {
                     min_sum = 0,
                     max_sum = 10_000_000,
@@ -89,15 +103,30 @@ internal sealed class BalancerFixture : IAsyncDisposable
                     subjects = subjects ?? new[] { "credit", "deposit", "cards", "mortgage", "insurance" },
                     segments = new[] { "micro", "small", "medium", "large" },
                     client_classes = new[] { "standard", "vip" },
-                })), CancellationToken.None);
+                }), extra)), CancellationToken.None);
             return true;
         });
 
     public static object DefaultOrder(string subject = "credit", decimal sum = 50_000, string clientClass = "standard") =>
         new { sum, order_type = "ORDER_1", subject, client_segment = "small", client_class = clientClass };
 
-    private static Dictionary<string, JsonElement> Attributes(object value) =>
+    public static Dictionary<string, JsonElement> Attributes(object value) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(value))!;
+
+    public static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
+
+    private static Dictionary<string, JsonElement> Merge(Dictionary<string, JsonElement> values, object? extra)
+    {
+        if (extra is not null)
+        {
+            foreach (var (key, value) in Attributes(extra))
+            {
+                values[key] = value;
+            }
+        }
+
+        return values;
+    }
 
     public async ValueTask DisposeAsync()
     {

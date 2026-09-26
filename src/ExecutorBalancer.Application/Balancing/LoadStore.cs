@@ -31,7 +31,7 @@ public enum LoadRelease
     /// <summary>Заявка ушла на доработку и может вернуться.</summary>
     Await,
 
-    /// <summary>Решение не удалось сохранить в базе — откатываем счётчики и забываем заявку.</summary>
+    /// <summary>Решение не удалось сохранить в базе — откатываем счётчики (включая суточный) и забываем заявку.</summary>
     Rollback,
 }
 
@@ -52,7 +52,10 @@ public enum PickStatus
 /// <param name="Verdict">eligible, inactive или daily_limit_exceeded.</param>
 public sealed record SlotReport(long ExecutorId, string Verdict, long OpenWeightMilli, int AssignedToday);
 
-public sealed record PickResult(PickStatus Status, long? ExecutorId, IReadOnlyList<SlotReport> Report);
+/// <param name="HeldSince">С какого момента заявка закреплена за исполнителем в хранилище нагрузки.
+/// Для записей, восстановленных из базы, неизвестно.</param>
+public sealed record PickResult(PickStatus Status, long? ExecutorId, IReadOnlyList<SlotReport> Report,
+    DateTimeOffset? HeldSince = null);
 
 /// <summary>
 /// Веса хранятся в тысячных долях целыми числами: сравнение нагрузки в Redis и в C#

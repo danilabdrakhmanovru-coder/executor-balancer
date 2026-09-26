@@ -16,10 +16,12 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
 
     // KEYS: 1 open-weight, 2 open-count, 3 daily, 4 active, 5 order
     // ARGV: 1 вес заявки, 2 reopen, 3 ttl дневного счётчика, далее тройки: id, квалификация, лимит (-1 — нет)
+    // Ответ: статус, исполнитель, с какого момента заявка за ним (unix-секунды), далее строки отчёта.
     private const string PickScript = """
         local state = redis.call('HGET', KEYS[5], 'state')
         if state == 'open' or (state and ARGV[2] ~= '1') then
-          return {'existing', redis.call('HGET', KEYS[5], 'executor') or ''}
+          local held = redis.call('HMGET', KEYS[5], 'executor', 'at')
+          return {'existing', held[1] or '', held[2] or ''}
         end
         local w = tonumber(ARGV[1])
         local best, bestLoad, bestQ, bestDaily
@@ -56,15 +58,17 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
           end
         end
         if best == nil then
-          return {'none', '', unpack(report)}
+          return {'none', '', '', unpack(report)}
         end
+        local now = redis.call('TIME')[1]
         redis.call('HINCRBY', KEYS[1], best, w)
         redis.call('HINCRBY', KEYS[2], best, 1)
         redis.call('HINCRBY', KEYS[3], best, 1)
         redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
-        redis.call('HSET', KEYS[5], 'executor', best, 'weight', w, 'state', 'open')
+        -- day: какой суточный счётчик увеличен — откат должен вернуть именно его
+        redis.call('HSET', KEYS[5], 'executor', best, 'weight', w, 'state', 'open', 'at', now, 'day', KEYS[3])
         redis.call('PERSIST', KEYS[5])
-        return {'assigned', best, unpack(report)}
+        return {'assigned', best, now, unpack(report)}
         """;
 
     // KEYS: 1 open-weight, 2 open-count, 3 order. ARGV: 1 новое состояние, 2 ttl, 3 удалить ключ (1/0)
@@ -78,6 +82,12 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
         redis.call('HINCRBY', KEYS[1], executor, -w)
         redis.call('HINCRBY', KEYS[2], executor, -1)
         if ARGV[3] == '1' then
+          -- откат: решение не сохранено, поэтому место в суточном лимите тоже возвращается.
+          -- Ключ счётчика записан в самой заявке; у всех ключей общий hash tag {eb}, слот тот же
+          local day = redis.call('HGET', KEYS[3], 'day')
+          if day and tonumber(redis.call('HGET', day, executor) or '0') > 0 then
+            redis.call('HINCRBY', day, executor, -1)
+          end
           redis.call('DEL', KEYS[3])
         else
           redis.call('HSET', KEYS[3], 'state', ARGV[1])
@@ -114,13 +124,17 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
 
         var status = (string)raw[0]!;
         var executor = (string?)raw[1];
-        var report = raw.Skip(2).Select(item => ParseReport((string)item!)).ToList();
+        var heldAt = (string?)raw[2];
+        var report = raw.Skip(3).Select(item => ParseReport((string)item!)).ToList();
         long? executorId = string.IsNullOrEmpty(executor) ? null : long.Parse(executor, CultureInfo.InvariantCulture);
+        DateTimeOffset? heldSince = string.IsNullOrEmpty(heldAt)
+            ? null
+            : DateTimeOffset.FromUnixTimeSeconds(long.Parse(heldAt, CultureInfo.InvariantCulture));
 
         return status switch
         {
-            "assigned" => new PickResult(PickStatus.Assigned, executorId, report),
-            "existing" => new PickResult(PickStatus.AlreadyAssigned, executorId, report),
+            "assigned" => new PickResult(PickStatus.Assigned, executorId, report, heldSince),
+            "existing" => new PickResult(PickStatus.AlreadyAssigned, executorId, report, heldSince),
             _ => new PickResult(PickStatus.NoCandidate, null, report),
         };
     }

@@ -27,7 +27,7 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 
 builder.Services.AddProblemDetails();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options => options.AddDocumentTransformer<ApiKeyOpenApiTransformer>());
 builder.Services.AddBalancerRateLimits();
 builder.Services.AddScoped<ApiKeyFilter>();
 builder.Services.AddAdminAuth(builder.Configuration);
@@ -56,6 +56,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" })).ExcludeFromDescri
 app.MapIntegrationEndpoints();
 app.MapAuthEndpoints();
 app.MapDashboardEndpoints();
+app.MapAdminEndpoints();
 
 app.Run();
 

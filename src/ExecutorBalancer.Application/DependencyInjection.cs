@@ -1,4 +1,6 @@
+using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
+using ExecutorBalancer.Application.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,6 +19,8 @@ public static class DependencyInjection
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<ExecutorDirectory>();
         services.AddScoped<OrderBalancer>();
+        services.AddScoped<ConfigurationService>();
+        services.AddScoped<AnalyticsService>();
         return services;
     }
 }
