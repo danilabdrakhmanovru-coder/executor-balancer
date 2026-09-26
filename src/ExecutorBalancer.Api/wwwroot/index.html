@@ -41,6 +41,11 @@
             <span class="brand-sub">распределение заявок в реальном времени</span>
           </span>
         </div>
+        <div class="dept-switch">
+          <label for="department" class="dept-label"><svg class="icon"><use href="icons.svg#building"></use></svg>Отдел</label>
+          <select id="department" class="form-select" aria-label="Отдел"></select>
+          <span id="department-sphere" class="dept-sphere d-none d-lg-inline"></span>
+        </div>
         <div class="navbar-nav flex-row ms-auto align-items-center gap-2">
           <span id="updated" class="text-secondary small d-none d-md-inline"></span>
           <button id="theme" class="btn btn-icon btn-ghost-secondary" type="button" title="Светлая или тёмная тема" aria-label="Тема">
@@ -56,13 +61,12 @@
     <nav class="app-nav d-print-none">
       <div class="container-xl">
         <div class="app-tabs" id="tabs">
-          <button data-tab="demo" class="nav-link tab hidden" id="tab-button-demo" type="button"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Демонстрация</button>
-          <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Обзор</button>
-          <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Исполнители</button>
+          <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Мониторинг</button>
+          <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Сотрудники</button>
           <button data-tab="analytics" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Аналитика</button>
-          <button data-tab="constructor" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#adjustments"></use></svg>Конструктор</button>
-          <button data-tab="preview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#zoom-check"></use></svg>Проверка заявки</button>
+          <button data-tab="constructor" data-group="settings" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#settings"></use></svg>Настройки</button>
           <button data-tab="audit" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#history"></use></svg>Журнал</button>
+          <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Пульт эмулятора внешней системы — только для демонстрации"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Имитация АИС</button>
         </div>
       </div>
     </nav>
@@ -78,14 +82,14 @@
                 <div class="d-flex gap-3">
                   <span class="avatar avatar-md bg-primary-lt"><svg class="icon"><use href="icons.svg#info-circle"></use></svg></span>
                   <div>
-                    <h3 class="card-title mb-2">Как это работает</h3>
+                    <h3 class="card-title mb-2">Пульт имитации АИС</h3>
                     <p class="mb-2">Клиенты оставляют обращения во внешней системе компании — АИС (CRM, учётная система банка, склада,
                       магазина). АИС сразу передаёт каждое обращение сюда, и сервис за доли секунды решает, какому сотруднику его отдать:
                       только тем, кто сейчас работает и подходит по правилам из конструктора, а из них — тому, у кого меньше нагрузка
                       с учётом опыта. Решение уходит обратно в АИС.</p>
-                    <p class="text-secondary mb-0">Настоящей АИС на демонстрации нет — её изображает эмулятор. Пульт ниже управляет им:
-                      выбирает сферу, заводит сотрудников, запускает поток обращений и имитирует работу сотрудников
-                      (решено, отказ, на доработку).</p>
+                    <p class="text-secondary mb-0">Настоящей АИС на демонстрации нет — её изображает эмулятор. Пульт ниже управляет
+                      им в рамках отдела, выбранного в шапке: заводит сотрудников, запускает поток обращений и имитирует работу
+                      сотрудников (решено, отказ, на доработку). Сфера отдела и его правила задаются в «Настройках».</p>
                   </div>
                 </div>
               </div>
@@ -99,22 +103,14 @@
               <div class="card-body"><div id="demo-flow" class="flow"></div></div>
             </div>
 
-            <div class="card">
-              <div class="card-header"><h3 class="card-title"><span class="step-no">1</span>Сфера деятельности</h3></div>
-              <div class="card-body">
-                <p class="text-secondary">Сервис не привязан к банку: параметры и правила — это настройки, а не код. Шаблон заменяет
-                  параметры, правила и веса на набор для другой отрасли; поток заявок и сотрудники подстроятся под него.</p>
-                <div id="demo-presets" class="presets"></div>
-              </div>
-            </div>
-
             <div class="row row-cards">
               <div class="col-lg-6">
                 <div class="card h-100">
-                  <div class="card-header"><h3 class="card-title"><span class="step-no">2</span>Сотрудники</h3></div>
+                  <div class="card-header"><h3 class="card-title"><span class="step-no">1</span>Сотрудники отдела</h3></div>
                   <div class="card-body">
-                    <p class="text-secondary">Заводит сотрудников в АИС со случайными навыками, опытом и дневными лимитами в рамках
-                      выбранной сферы. АИС передаёт их балансировщику. Прежние сотрудники сверх нового числа уходят в неактивные.</p>
+                    <p class="text-secondary">Заводит сотрудников этого отдела в АИС со случайными навыками, опытом и дневными
+                      лимитами по параметрам отдела. АИС передаёт их балансировщику. Прежние сотрудники отдела сверх нового числа
+                      уходят в неактивные; другие отделы не затрагиваются.</p>
                     <div id="demo-seed-count" class="mb-3"></div>
                     <div class="btn-list">
                       <button id="demo-seed" class="btn btn-primary" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Завести сотрудников</button>
@@ -126,10 +122,11 @@
               </div>
               <div class="col-lg-6">
                 <div class="card h-100">
-                  <div class="card-header"><h3 class="card-title"><span class="step-no">3</span>Поток обращений</h3></div>
+                  <div class="card-header"><h3 class="card-title"><span class="step-no">2</span>Поток обращений</h3></div>
                   <div class="card-body">
-                    <p class="text-secondary">Эмулятор создаёт обращения с заданной скоростью, а сотрудники в нём «работают»: каждую
-                      секунду часть назначенных заявок решается, отклоняется или уходит на доработку и потом возвращается.</p>
+                    <p class="text-secondary">Эмулятор создаёт обращения этого отдела с заданной скоростью, а сотрудники в нём
+                      «работают»: каждую секунду часть назначенных заявок решается, отклоняется или уходит на доработку и потом
+                      возвращается. Потоки разных отделов идут одновременно и независимо.</p>
                     <input id="demo-rate" class="form-range" type="range" min="500" max="40000" step="500" value="4000" aria-label="Скорость потока">
                     <p id="demo-rate-label" class="rate"></p>
                     <div class="btn-list">
@@ -146,7 +143,7 @@
               <div class="col-lg-6">
                 <div class="card h-100">
                   <div class="card-header">
-                    <h3 class="card-title"><span class="step-no">4</span>Одно обращение вручную</h3>
+                    <h3 class="card-title"><span class="step-no">3</span>Одно обращение вручную</h3>
                     <div class="card-actions">
                       <button id="demo-order-sample" class="btn btn-sm" type="button"><svg class="icon"><use href="icons.svg#wand"></use></svg>Заполнить примером</button>
                     </div>
@@ -186,15 +183,15 @@
 
           <!-- Исполнители -->
           <section id="tab-executors" class="tab-page hidden">
-            <p class="page-hint">Сотрудники, которых передала АИС: что умеют (параметры из конструктора), насколько загружены и
+            <p class="page-hint">Сотрудники отдела, которых передала АИС: что умеют (параметры отдела), насколько загружены и
               сколько получили сегодня. Заявка достаётся только тому, кто на работе и подходит по всем правилам.</p>
             <div id="executors-list" class="executors-grid"></div>
           </section>
 
           <!-- Обзор -->
           <section id="tab-overview" class="tab-page hidden">
-            <p class="page-hint">Мониторинг в реальном времени: сколько заявок, как загружены сотрудники и кому уходят новые заявки.
-              Обновляется каждые 2 секунды.</p>
+            <p class="page-hint">Мониторинг отдела в реальном времени: сколько заявок, как загружены сотрудники и кому уходят
+              новые заявки. Обновляется каждые 2 секунды.</p>
             <div class="row row-cards tiles" id="tiles"></div>
             <p id="rule-errors" class="text-danger"></p>
             <div class="card">
@@ -298,7 +295,14 @@
             </div>
           </section>
 
-          <!-- Конструктор -->
+          <!-- Настройки: подменю -->
+          <div id="settings-nav" class="btn-group settings-nav hidden" role="group" aria-label="Раздел настроек">
+            <button class="btn" data-tab="constructor" type="button"><svg class="icon"><use href="icons.svg#adjustments"></use></svg>Параметры и правила</button>
+            <button class="btn" data-tab="preview" type="button"><svg class="icon"><use href="icons.svg#zoom-check"></use></svg>Проверка заявки</button>
+            <button class="btn" data-tab="departments" type="button"><svg class="icon"><use href="icons.svg#building"></use></svg>Отделы</button>
+          </div>
+
+          <!-- Настройки → Параметры и правила -->
           <section id="tab-constructor" class="tab-page hidden">
             <div class="card intro">
               <div class="card-body">
@@ -310,16 +314,19 @@
                       («Тематики», «Максимальная сумма»). АИС передаёт значения под этими ключами. <strong>Правило</strong> связывает
                       их: «Тематика заявки — одно из — Тематики сотрудника». Сотрудник получает заявку, только если выполнены все
                       правила. <strong>Вес заявки</strong> — насколько она сложная: сложные нагружают сильнее.</p>
-                    <p class="text-secondary mb-0">Изменения применяются сразу, без перезапуска и программиста: следующая заявка
-                      распределяется уже по новым правилам. Каждое изменение проверяется и записывается в журнал.</p>
+                    <p class="text-secondary mb-0">Настройки относятся к отделу, выбранному в шапке; у других отделов свои.
+                      Изменения применяются сразу, без перезапуска и программиста: следующая заявка распределяется уже по новым
+                      правилам. Каждое изменение проверяется и записывается в журнал.</p>
                   </div>
                 </div>
               </div>
             </div>
             <div class="card">
-              <div class="card-header"><h3 class="card-title">Шаблоны сфер</h3></div>
+              <div class="card-header"><h3 class="card-title">Сфера отдела</h3></div>
               <div class="card-body">
-                <p class="text-secondary">Готовые наборы параметров и правил для разных отраслей — можно взять за основу и дополнить своими.</p>
+                <p class="text-secondary">Готовые наборы параметров и правил для разных отраслей. Применение заменяет настройки
+                  только этого отдела. Чтобы работать с другой сферой параллельно, создайте для неё отдельный отдел
+                  (Настройки → Отделы).</p>
                 <div id="constructor-presets" class="presets"></div>
               </div>
             </div>
@@ -397,6 +404,25 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <!-- Настройки → Отделы -->
+          <section id="tab-departments" class="tab-page hidden">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Отделы</h3>
+                <div class="card-actions"><button id="department-add" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Новый отдел</button></div>
+              </div>
+              <div class="card-body pb-0">
+                <p class="text-secondary">Каждый отдел — отдельное пространство со своими параметрами, правилами, сотрудниками,
+                  заявками и отчётами. Отделы работают одновременно; переключение в шапке ничего не стирает. Удалить можно
+                  только отдел без сотрудников и заявок — история распределения сохраняется.</p>
+              </div>
+              <div class="table-responsive"><table class="table card-table table-vcenter">
+                <thead><tr><th>Отдел</th><th>Сфера</th><th>На работе</th><th>Заявок в работе</th><th>Адрес для АИС</th><th></th></tr></thead>
+                <tbody id="departments"></tbody>
+              </table></div>
             </div>
           </section>
 

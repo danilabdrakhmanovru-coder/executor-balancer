@@ -8,6 +8,7 @@ namespace ExecutorBalancer.Infrastructure.Persistence;
 public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> options)
     : DbContext(options), IBalancerDbContext
 {
+    public DbSet<Department> Departments => Set<Department>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<Executor> Executors => Set<Executor>();
     public DbSet<Assignment> Assignments => Set<Assignment>();
@@ -27,9 +28,20 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var model = modelBuilder;
+        model.Entity<Department>(e =>
+        {
+            e.ToTable("departments");
+            e.Property(x => x.Code).HasMaxLength(32);
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.Property(x => x.PresetId).HasMaxLength(32);
+            e.HasIndex(x => x.Code).IsUnique();
+        });
+
         model.Entity<Executor>(e =>
         {
             e.ToTable("executors");
+            e.HasIndex(x => x.DepartmentId);
+            e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             e.Property(x => x.Id).ValueGeneratedNever();
             e.Property(x => x.FullName).HasMaxLength(300);
             e.Property(x => x.QualificationWeight).HasPrecision(10, 3);
@@ -46,6 +58,8 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.PendingReason).HasMaxLength(300);
             e.HasIndex(x => x.ParentId);
             e.HasIndex(x => new { x.Status, x.ExecutorId });
+            e.HasIndex(x => new { x.DepartmentId, x.Status });
+            e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Restrict);
         });
 
         model.Entity<Assignment>(e =>
@@ -59,6 +73,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.HasIndex(x => x.OrderId, "ux_assignments_current_order").IsUnique().HasFilter("\"IsCurrent\"");
             e.HasIndex(x => x.OrderId, "ix_assignments_order");
             e.HasIndex(x => x.CreatedAt, "ix_assignments_created_at");
+            e.HasIndex(x => new { x.DepartmentId, x.Id }, "ix_assignments_department");
         });
 
         model.Entity<FieldDefinition>(e =>
@@ -68,7 +83,8 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.Type).HasConversion<string>().HasMaxLength(16);
             e.Property(x => x.Key).HasMaxLength(48);
             e.Property(x => x.Label).HasMaxLength(120);
-            e.HasIndex(x => new { x.Owner, x.Key }).IsUnique();
+            e.HasIndex(x => new { x.DepartmentId, x.Owner, x.Key }).IsUnique();
+            e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         model.Entity<Rule>(e =>
@@ -81,6 +97,8 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.ExecutorField).HasMaxLength(48);
             e.Property(x => x.ExecutorFieldUpper).HasMaxLength(48);
             e.Property(x => x.ValueJson).HasColumnType("jsonb");
+            e.HasIndex(x => x.DepartmentId);
+            e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         model.Entity<WeightRule>(e =>
@@ -90,6 +108,8 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.Operator).HasConversion<string>().HasMaxLength(32);
             e.Property(x => x.ValueJson).HasColumnType("jsonb");
             e.Property(x => x.Weight).HasPrecision(10, 3);
+            e.HasIndex(x => x.DepartmentId);
+            e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         model.Entity<OutboxMessage>(e =>
@@ -108,12 +128,14 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.EntityId).HasMaxLength(50);
             e.Property(x => x.DataJson).HasColumnType("jsonb");
             e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.DepartmentId, x.Id });
         });
 
         model.Entity<ExecutorHourStat>(e =>
         {
             e.ToTable("executor_hour_stats");
             e.HasKey(x => new { x.BucketHour, x.ExecutorId });
+            e.HasIndex(x => new { x.DepartmentId, x.BucketHour });
             e.Property(x => x.AssignedWeight).HasPrecision(18, 3);
             e.Property(x => x.FreeWeight).HasPrecision(18, 3);
         });
@@ -121,7 +143,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
         model.Entity<EligibilityHourStat>(e =>
         {
             e.ToTable("eligibility_hour_stats");
-            e.HasKey(x => new { x.BucketHour, x.SetKey });
+            e.HasKey(x => new { x.DepartmentId, x.BucketHour, x.SetKey });
             e.Property(x => x.SetKey).HasMaxLength(EligibilityHourStat.MaxSetKeyLength);
             e.Property(x => x.Weight).HasPrecision(18, 3);
         });

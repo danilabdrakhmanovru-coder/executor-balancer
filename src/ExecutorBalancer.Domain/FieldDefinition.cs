@@ -4,6 +4,8 @@ namespace ExecutorBalancer.Domain;
 public class FieldDefinition
 {
     public int Id { get; set; }
+
+    public int DepartmentId { get; set; } = Department.DefaultId;
     public FieldOwner Owner { get; set; }
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";

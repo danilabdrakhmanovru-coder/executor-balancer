@@ -5,9 +5,14 @@ namespace AisEmulator.Api.Simulation;
 /// <param name="RatePerHour">Сколько заявок в час создают «клиенты».</param>
 /// <param name="WorkPerSecond">Доля назначенных заявок, которые исполнители обрабатывают за секунду.</param>
 /// <param name="ParentProbability">Доля заявок, связанных с недавней заявкой (parent_id).</param>
+/// <param name="Department">Код отдела балансировщика; null — основной отдел.</param>
+/// <param name="RatePerHour">Сколько заявок в час создают «клиенты».</param>
+/// <param name="WorkPerSecond">Доля назначенных заявок, которые исполнители обрабатывают за секунду.</param>
+/// <param name="ParentProbability">Доля заявок, связанных с недавней заявкой (parent_id).</param>
 public sealed record SimulationRequest(
     double RatePerHour,
     ValueSpec[] OrderFields,
+    string? Department = null,
     double WorkPerSecond = 0.15,
     double ParentProbability = 0.08)
 {
@@ -15,6 +20,11 @@ public sealed record SimulationRequest(
 
     public string? Validate()
     {
+        if (!AisCommands.IsValidDepartment(Department))
+        {
+            return "неверный код отдела";
+        }
+
         if (RatePerHour is <= 0 or > MaxRatePerHour)
         {
             return $"скорость — от 1 до {MaxRatePerHour} заявок в час";
@@ -46,52 +56,82 @@ public sealed record SimulationStatus(
 
 /// <summary>
 /// Симуляция живой АИС для демонстрации: поток заявок от клиентов и работа исполнителей
-/// (решено, отклонено, на доработку и возврат с доработки). Включается и выключается через API.
+/// (решено, отклонено, на доработку и возврат с доработки). У каждого отдела свой поток —
+/// их можно запускать и останавливать независимо.
 /// </summary>
 public sealed class SimulationService(AisStore store, AisCommands commands, ILogger<SimulationService> logger)
     : BackgroundService
 {
+    private const int MaxFlows = 20;
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(100);
 
     private readonly Random _random = new();
     private readonly object _gate = new();
-    private readonly Dictionary<long, DateTimeOffset> _rework = new();
-    private readonly List<long> _recent = new();
-    private SimulationRequest? _settings;
-    private DateTimeOffset? _startedAt;
-    private double _due;
-    private DateTimeOffset _lastWork = DateTimeOffset.MinValue;
-    private long _created, _accepted, _rejected, _toRework, _returned;
+    private readonly Dictionary<string, Flow> _flows = new();
 
-    public void Start(SimulationRequest request)
+    /// <summary>Состояние потока одного отдела. Меняется только в шаге таймера, счётчики — атомарно.</summary>
+    private sealed class Flow(string? department)
     {
-        lock (_gate)
-        {
-            _settings = request;
-            _startedAt ??= DateTimeOffset.UtcNow;
-        }
-
-        logger.LogInformation("Симуляция: {Rate} заявок в час", request.RatePerHour);
+        public string? Department { get; } = department;
+        public SimulationRequest? Settings { get; set; }
+        public DateTimeOffset? StartedAt { get; set; }
+        public double Due { get; set; }
+        public DateTimeOffset LastWork { get; set; } = DateTimeOffset.MinValue;
+        public Dictionary<long, DateTimeOffset> Rework { get; } = new();
+        public List<long> Recent { get; } = new();
+        public long Created, Accepted, Rejected, ToRework, Returned;
     }
 
-    public void Stop()
+    private static string Key(string? department) => department ?? "";
+
+    public string? Start(SimulationRequest request)
     {
         lock (_gate)
         {
-            _settings = null;
-            _startedAt = null;
+            if (!_flows.TryGetValue(Key(request.Department), out var flow))
+            {
+                if (_flows.Count >= MaxFlows)
+                {
+                    return $"одновременно — не больше {MaxFlows} потоков";
+                }
+
+                _flows[Key(request.Department)] = flow = new Flow(request.Department);
+            }
+
+            flow.Settings = request;
+            flow.StartedAt ??= DateTimeOffset.UtcNow;
         }
 
-        logger.LogInformation("Симуляция остановлена");
+        logger.LogInformation("Симуляция {Department}: {Rate} заявок в час", request.Department ?? "(основной)", request.RatePerHour);
+        return null;
     }
 
-    public SimulationStatus Status()
+    public void Stop(string? department)
     {
         lock (_gate)
         {
-            return new SimulationStatus(_settings is not null, _settings?.RatePerHour ?? 0, _startedAt,
-                Interlocked.Read(ref _created), Interlocked.Read(ref _accepted), Interlocked.Read(ref _rejected),
-                Interlocked.Read(ref _toRework), Interlocked.Read(ref _returned));
+            if (_flows.TryGetValue(Key(department), out var flow))
+            {
+                flow.Settings = null;
+                flow.StartedAt = null;
+            }
+        }
+
+        logger.LogInformation("Симуляция {Department} остановлена", department ?? "(основной)");
+    }
+
+    public SimulationStatus Status(string? department)
+    {
+        lock (_gate)
+        {
+            if (!_flows.TryGetValue(Key(department), out var flow))
+            {
+                return new SimulationStatus(false, 0, null, 0, 0, 0, 0, 0);
+            }
+
+            return new SimulationStatus(flow.Settings is not null, flow.Settings?.RatePerHour ?? 0, flow.StartedAt,
+                Interlocked.Read(ref flow.Created), Interlocked.Read(ref flow.Accepted), Interlocked.Read(ref flow.Rejected),
+                Interlocked.Read(ref flow.ToRework), Interlocked.Read(ref flow.Returned));
         }
     }
 
@@ -100,68 +140,66 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
         using var timer = new PeriodicTimer(Tick);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            try
+            List<(Flow Flow, SimulationRequest Settings)> running;
+            lock (_gate)
             {
-                Step();
+                running = _flows.Values.Where(f => f.Settings is not null).Select(f => (f, f.Settings!)).ToList();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+
+            foreach (var (flow, settings) in running)
             {
-                logger.LogError(ex, "Ошибка шага симуляции");
+                try
+                {
+                    Step(flow, settings);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogError(ex, "Ошибка шага симуляции");
+                }
             }
         }
     }
 
-    private void Step()
+    private void Step(Flow flow, SimulationRequest settings)
     {
-        SimulationRequest? settings;
-        lock (_gate)
-        {
-            settings = _settings;
-        }
-
-        if (settings is null)
-        {
-            return;
-        }
-
         // поток заявок: копим «долю заявки» за каждый тик, создаём целые
-        _due += settings.RatePerHour / 3600 * Tick.TotalSeconds;
-        while (_due >= 1)
+        flow.Due += settings.RatePerHour / 3600 * Tick.TotalSeconds;
+        while (flow.Due >= 1)
         {
-            _due -= 1;
-            CreateOrder(settings);
+            flow.Due -= 1;
+            CreateOrder(flow, settings);
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (now - _lastWork >= TimeSpan.FromSeconds(1))
+        if (now - flow.LastWork >= TimeSpan.FromSeconds(1))
         {
-            _lastWork = now;
-            Work(settings, now);
+            flow.LastWork = now;
+            Work(flow, settings, now);
         }
     }
 
-    private void CreateOrder(SimulationRequest settings)
+    private void CreateOrder(Flow flow, SimulationRequest settings)
     {
         var attributes = settings.OrderFields.ToDictionary(f => f.Key, f => f.Generate(_random));
-        long? parentId = _recent.Count > 0 && _random.NextDouble() < settings.ParentProbability
-            ? _recent[_random.Next(_recent.Count)]
+        long? parentId = flow.Recent.Count > 0 && _random.NextDouble() < settings.ParentProbability
+            ? flow.Recent[_random.Next(flow.Recent.Count)]
             : null;
-        var order = commands.CreateOrder(parentId, attributes);
-        _recent.Add(order.Id);
-        if (_recent.Count > 200)
+        var order = commands.CreateOrder(flow.Department, parentId, attributes);
+        flow.Recent.Add(order.Id);
+        if (flow.Recent.Count > 200)
         {
-            _recent.RemoveAt(0);
+            flow.Recent.RemoveAt(0);
         }
 
-        Interlocked.Increment(ref _created);
+        Interlocked.Increment(ref flow.Created);
     }
 
     /// <summary>Исполнители работают: назначение уже записано в АИС — заявку можно решить.</summary>
-    private void Work(SimulationRequest settings, DateTimeOffset now)
+    private void Work(Flow flow, SimulationRequest settings, DateTimeOffset now)
     {
-        foreach (var order in store.Orders("processed", assigned: true, limit: 1000))
+        foreach (var order in store.Orders("processed", assigned: true, limit: 1000, department: flow.Department ?? AisStore.NoDepartment))
         {
-            if (_rework.ContainsKey(order.Id) || _random.NextDouble() >= settings.WorkPerSecond)
+            if (flow.Rework.ContainsKey(order.Id) || _random.NextDouble() >= settings.WorkPerSecond)
             {
                 continue;
             }
@@ -171,29 +209,34 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
             commands.SetStatus(order.Id, status);
             switch (status)
             {
-                case "accept": Interlocked.Increment(ref _accepted); break;
-                case "reject": Interlocked.Increment(ref _rejected); break;
+                case "accept": Interlocked.Increment(ref flow.Accepted); break;
+                case "reject": Interlocked.Increment(ref flow.Rejected); break;
                 default:
-                    Interlocked.Increment(ref _toRework);
-                    _rework[order.Id] = now + TimeSpan.FromSeconds(5 + _random.NextDouble() * 15);
+                    Interlocked.Increment(ref flow.ToRework);
+                    flow.Rework[order.Id] = now + TimeSpan.FromSeconds(5 + _random.NextDouble() * 15);
                     break;
             }
         }
 
         // клиент дописал заявку — она возвращается в рассмотрение
-        foreach (var (id, _) in _rework.Where(p => p.Value <= now).ToList())
+        foreach (var (id, _) in flow.Rework.Where(p => p.Value <= now).ToList())
         {
-            _rework.Remove(id);
+            flow.Rework.Remove(id);
             commands.SetStatus(id, "processed");
-            Interlocked.Increment(ref _returned);
+            Interlocked.Increment(ref flow.Returned);
         }
     }
 }
 
-/// <summary>Завести исполнителей для демонстрации: ID 1..Count, остальные деактивируются.</summary>
+/// <summary>
+/// Завести исполнителей отдела для демонстрации: ID FirstId..FirstId+Count-1 (у каждого отдела свой диапазон —
+/// идентификаторы в АИС общие), прежние исполнители отдела вне диапазона деактивируются.
+/// </summary>
 public sealed record SeedExecutorsRequest(
     int Count,
     ValueSpec[] Fields,
+    string? Department = null,
+    long FirstId = 1,
     string[]? Names = null,
     int?[]? DailyLimits = null,
     decimal[]? Qualifications = null)
@@ -202,6 +245,11 @@ public sealed record SeedExecutorsRequest(
 
     public string? Validate()
     {
+        if (!AisCommands.IsValidDepartment(Department) || FirstId is < 1 or > 1_000_000_000)
+        {
+            return "неверный отдел или первый ID";
+        }
+
         if (Count is < 1 or > MaxCount)
         {
             return $"исполнителей — от 1 до {MaxCount}";
@@ -223,10 +271,11 @@ public sealed record SeedExecutorsRequest(
     public IReadOnlyList<AisExecutor> Build(Random random)
     {
         var names = Names is { Length: > 0 } ? Names : ["Исполнитель"];
-        return Enumerable.Range(1, Count).Select(id => new AisExecutor
+        return Enumerable.Range(1, Count).Select(n => new AisExecutor
         {
-            Id = id,
-            FullName = names.Length >= Count ? names[id - 1] : $"{names[(id - 1) % names.Length]} {id}",
+            Id = FirstId + n - 1,
+            Department = Department,
+            FullName = names.Length >= Count ? names[n - 1] : $"{names[(n - 1) % names.Length]} {n}",
             IsActive = true,
             DailyLimit = DailyLimits is { Length: > 0 } ? DailyLimits[random.Next(DailyLimits.Length)] : null,
             QualificationWeight = Qualifications is { Length: > 0 } ? Qualifications[random.Next(Qualifications.Length)] : 1m,

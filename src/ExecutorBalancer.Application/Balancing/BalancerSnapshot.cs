@@ -13,6 +13,7 @@ public sealed record ExecutorProfile(
 /// <summary>Неизменяемый срез конфигурации: справочник полей, правила и исполнители.</summary>
 public sealed class BalancerSnapshot
 {
+    public required int DepartmentId { get; init; }
     public required long Version { get; init; }
     public required FieldCatalog Catalog { get; init; }
     public required IReadOnlyList<CompiledRule> Rules { get; init; }

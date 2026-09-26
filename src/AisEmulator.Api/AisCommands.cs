@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AisEmulator.Api;
 
@@ -6,12 +7,18 @@ namespace AisEmulator.Api;
 /// Действия АИС, о которых нужно сообщить балансировщику: запись в хранилище и постановка события в очередь.
 /// Одни и те же для HTTP API эмулятора и для симуляции потока.
 /// </summary>
-public sealed class AisCommands(AisStore store, BalancerForwarder forwarder)
+public sealed partial class AisCommands(AisStore store, BalancerForwarder forwarder)
 {
-    public AisOrder CreateOrder(long? parentId, Dictionary<string, JsonElement> attributes)
+    /// <summary>Код отдела балансировщика — тот же формат, что проверяет балансировщик; попадает в адрес запроса.</summary>
+    [GeneratedRegex("^[a-z][a-z0-9_-]{0,31}$")]
+    private static partial Regex DepartmentPattern();
+
+    public static bool IsValidDepartment(string? code) => code is null || DepartmentPattern().IsMatch(code);
+
+    public AisOrder CreateOrder(string? department, long? parentId, Dictionary<string, JsonElement> attributes)
     {
-        var order = store.CreateOrder(parentId, attributes);
-        forwarder.Enqueue(new ForwardCommand(HttpMethod.Post, "api/integration/orders",
+        var order = store.CreateOrder(department, parentId, attributes);
+        forwarder.Enqueue(new ForwardCommand(HttpMethod.Post, Route(department, "orders"),
             new { id = order.Id, parentId = order.ParentId, attributes = order.Attributes }));
         return order;
     }
@@ -46,7 +53,7 @@ public sealed class AisCommands(AisStore store, BalancerForwarder forwarder)
     }
 
     private void Forward(AisExecutor e) =>
-        forwarder.Enqueue(new ForwardCommand(HttpMethod.Put, $"api/integration/executors/{e.Id}", new
+        forwarder.Enqueue(new ForwardCommand(HttpMethod.Put, Route(e.Department, $"executors/{e.Id}"), new
         {
             fullName = e.FullName,
             isActive = e.IsActive,
@@ -54,4 +61,8 @@ public sealed class AisCommands(AisStore store, BalancerForwarder forwarder)
             qualificationWeight = e.QualificationWeight,
             attributes = e.Attributes,
         }));
+
+    /// <summary>Заявки и исполнители отдела — в его адрес; без отдела — старый адрес основного отдела.</summary>
+    private static string Route(string? department, string path) =>
+        department is null ? $"api/integration/{path}" : $"api/integration/departments/{department}/{path}";
 }

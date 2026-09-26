@@ -18,10 +18,10 @@ export async function renderPresets(container, onApplied) {
     card.append(el('p', `Исполнитель: ${p.executorFields.join(', ')}`, 'fine'));
     if (!p.isCurrent) {
       card.append(button('Применить', async () => {
-        if (!confirm(`Заменить параметры, правила и веса на шаблон «${p.title}»? Изменение попадёт в журнал.`)) return;
+        if (!confirm(`Заменить параметры, правила и веса этого отдела на шаблон «${p.title}»? Другие отделы не изменятся. Изменение попадёт в журнал.`)) return;
         try {
           await api(`/api/admin/presets/${encodeURIComponent(p.id)}/apply`, { method: 'POST' });
-          toast(`Применён шаблон «${p.title}». Заведите исполнителей заново — у прежних другие навыки.`);
+          toast(`Применён шаблон «${p.title}». Заведите сотрудников отдела заново — у прежних другие навыки.`);
           await renderPresets(container, onApplied);
           await onApplied?.();
         } catch (e) {

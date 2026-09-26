@@ -5,6 +5,8 @@ public class Order
     /// <summary>Идентификатор заявки во внешней АИС.</summary>
     public long Id { get; set; }
 
+    public int DepartmentId { get; set; } = Department.DefaultId;
+
     public long? ParentId { get; set; }
     public OrderStatus Status { get; set; }
     public decimal Weight { get; set; }

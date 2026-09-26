@@ -4,6 +4,8 @@ namespace ExecutorBalancer.Domain;
 public class Executor
 {
     public long Id { get; set; }
+
+    public int DepartmentId { get; set; } = Department.DefaultId;
     public string FullName { get; set; } = "";
     public bool IsActive { get; set; }
 

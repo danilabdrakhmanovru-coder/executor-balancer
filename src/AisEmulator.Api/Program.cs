@@ -52,7 +52,9 @@ var api = app.MapGroup("/api/ais").AddEndpointFilter(async (context, next) =>
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 // --- исполнители ---
-api.MapGet("/executors", (AisStore store) => Results.Ok(store.Executors()));
+// ?department=код — только этот отдел; без параметра — вся АИС
+api.MapGet("/executors", (string? department, AisStore store) =>
+    AisCommands.IsValidDepartment(department) ? Results.Ok(store.Executors(department)) : BadDepartment());
 
 api.MapPut("/executors/{id:long}", (long id, ExecutorBody body, AisCommands commands) =>
 {
@@ -61,9 +63,15 @@ api.MapPut("/executors/{id:long}", (long id, ExecutorBody body, AisCommands comm
         return Results.Problem(statusCode: 400, title: "Нужны положительный id и ФИО");
     }
 
+    if (!AisCommands.IsValidDepartment(body.Department))
+    {
+        return BadDepartment();
+    }
+
     return Results.Ok(commands.UpsertExecutor(new AisExecutor
     {
         Id = id,
+        Department = body.Department,
         FullName = body.FullName.Trim(),
         IsActive = body.IsActive,
         DailyLimit = body.DailyLimit,
@@ -76,20 +84,27 @@ api.MapPost("/executors/{id:long}/active", (long id, ActiveBody body, AisCommand
     commands.SetExecutorActive(id, body.IsActive) is { } executor ? Results.Ok(executor) : Results.NotFound());
 
 // --- заявки ---
-api.MapGet("/orders", (string? status, bool? assigned, int? limit, AisStore store) =>
-    Results.Ok(store.Orders(status, assigned, Math.Clamp(limit ?? 100, 1, 1000))));
+api.MapGet("/orders", (string? status, bool? assigned, int? limit, string? department, AisStore store) =>
+    AisCommands.IsValidDepartment(department)
+        ? Results.Ok(store.Orders(status, assigned, Math.Clamp(limit ?? 100, 1, 1000), department))
+        : BadDepartment());
 
 api.MapGet("/orders/{id:long}", (long id, AisStore store) =>
     store.GetOrder(id) is { } order ? Results.Ok(order) : Results.NotFound());
 
 api.MapPost("/orders", (OrderBody body, AisStore store, AisCommands commands) =>
 {
+    if (!AisCommands.IsValidDepartment(body.Department))
+    {
+        return BadDepartment();
+    }
+
     if (body.ParentId is { } parentId && store.GetOrder(parentId) is null)
     {
         return Results.Problem(statusCode: 400, title: "Родительская заявка не найдена");
     }
 
-    var order = commands.CreateOrder(body.ParentId, body.Attributes ?? new());
+    var order = commands.CreateOrder(body.Department, body.ParentId, body.Attributes ?? new());
     return Results.Created($"/api/ais/orders/{order.Id}", order);
 });
 
@@ -104,24 +119,29 @@ api.MapPost("/orders/{id:long}/status", (long id, StatusBody body, AisCommands c
     return commands.SetStatus(id, status) is { } order ? Results.Ok(order) : Results.NotFound();
 });
 
-// --- демонстрация: поток заявок и работа исполнителей ---
-api.MapGet("/simulation", (SimulationService simulation) => Results.Ok(simulation.Status()));
+// --- демонстрация: поток заявок и работа исполнителей, у каждого отдела свой ---
+api.MapGet("/simulation", (string? department, SimulationService simulation) =>
+    AisCommands.IsValidDepartment(department) ? Results.Ok(simulation.Status(department)) : BadDepartment());
 
 api.MapPost("/simulation/start", (SimulationRequest body, SimulationService simulation) =>
 {
-    if (body.Validate() is { } error)
+    if ((body.Validate() ?? simulation.Start(body)) is { } error)
     {
         return Results.Problem(statusCode: 400, title: error);
     }
 
-    simulation.Start(body);
-    return Results.Ok(simulation.Status());
+    return Results.Ok(simulation.Status(body.Department));
 });
 
-api.MapPost("/simulation/stop", (SimulationService simulation) =>
+api.MapPost("/simulation/stop", (string? department, SimulationService simulation) =>
 {
-    simulation.Stop();
-    return Results.Ok(simulation.Status());
+    if (!AisCommands.IsValidDepartment(department))
+    {
+        return BadDepartment();
+    }
+
+    simulation.Stop(department);
+    return Results.Ok(simulation.Status(department));
 });
 
 api.MapPost("/executors/seed", (SeedExecutorsRequest body, AisStore store, AisCommands commands) =>
@@ -137,8 +157,9 @@ api.MapPost("/executors/seed", (SeedExecutorsRequest body, AisStore store, AisCo
         commands.UpsertExecutor(executor);
     }
 
-    // прежние исполнители сверх нового набора уходят в неактивные
-    foreach (var extra in store.Executors().Where(e => e.Id > body.Count && e.IsActive))
+    // прежние исполнители отдела вне нового набора уходят в неактивные
+    var ids = created.Select(e => e.Id).ToHashSet();
+    foreach (var extra in store.Executors(body.Department ?? AisStore.NoDepartment).Where(e => !ids.Contains(e.Id) && e.IsActive))
     {
         commands.SetExecutorActive(extra.Id, false);
     }
@@ -166,20 +187,26 @@ api.MapPost("/assignments", (AssignmentBody body, AisStore store, ILogger<AisSto
     return Results.Accepted();
 });
 
-api.MapGet("/stats", (AisStore store, BalancerForwarder forwarder) => Results.Ok(new
-{
-    Store = store.Stats(),
-    Forwarding = new { forwarder.Backlog, forwarder.Delivered, forwarder.Dropped },
-}));
+api.MapGet("/stats", (string? department, AisStore store, BalancerForwarder forwarder) =>
+    AisCommands.IsValidDepartment(department)
+        ? Results.Ok(new
+        {
+            Store = store.Stats(department),
+            Forwarding = new { forwarder.Backlog, forwarder.Delivered, forwarder.Dropped },
+        })
+        : BadDepartment());
 
 app.Run();
 
-internal sealed record ExecutorBody(string? FullName, bool IsActive, int? DailyLimit, decimal? QualificationWeight,
+static IResult BadDepartment() =>
+    Results.Problem(statusCode: 400, title: "Код отдела: латинские буквы, цифры, «-» и «_», до 32 символов");
+
+internal sealed record ExecutorBody(string? Department, string? FullName, bool IsActive, int? DailyLimit, decimal? QualificationWeight,
     Dictionary<string, JsonElement>? Attributes);
 
 internal sealed record ActiveBody(bool IsActive);
 
-internal sealed record OrderBody(long? ParentId, Dictionary<string, JsonElement>? Attributes);
+internal sealed record OrderBody(string? Department, long? ParentId, Dictionary<string, JsonElement>? Attributes);
 
 internal sealed record StatusBody(string? Status);
 

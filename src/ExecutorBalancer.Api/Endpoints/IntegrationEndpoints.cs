@@ -4,6 +4,7 @@ using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
+using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,19 +22,50 @@ public static class IntegrationEndpoints
             .AddEndpointFilter<ApiKeyFilter>()
             .RequireRateLimiting(RateLimits.Integration);
 
-        group.MapPost("/orders", ReceiveOrder);
+        // Идентификаторы заявок и исполнителей общие для всей АИС, поэтому статус и назначение
+        // запрашиваются без отдела. Новые заявки, исполнители и метрики — в отдел по его коду;
+        // старые адреса без отдела работают с основным отделом.
+        group.MapPost("/orders", (OrderRequest request, OrderBalancer balancer, CancellationToken ct) =>
+            ReceiveOrder(Department.DefaultId, request, balancer, ct));
         group.MapPost("/orders/{id:long}/status", ChangeStatus);
         group.MapGet("/orders/{id:long}/assignment", GetAssignment);
-        group.MapPut("/executors/{id:long}", UpsertExecutor);
+        group.MapPut("/executors/{id:long}",
+            (long id, ExecutorRequest request, OrderBalancer balancer, CancellationToken ct) =>
+                UpsertExecutor(Department.DefaultId, id, request, balancer, ct));
+        group.MapGet("/metrics", (string? period, AnalyticsService analytics, CancellationToken ct) =>
+            Metrics(Department.DefaultId, period, analytics, ct));
+
+        var department = group.MapGroup("/departments/{code}");
+        department.MapPost("/orders", async (string code, OrderRequest request, DepartmentService departments,
+                OrderBalancer balancer, CancellationToken ct) =>
+            await departments.FindByCodeAsync(code, ct) is { } id
+                ? await ReceiveOrder(id, request, balancer, ct)
+                : NoDepartment());
+        department.MapPut("/executors/{id:long}", async (string code, long id, ExecutorRequest request,
+                DepartmentService departments, OrderBalancer balancer, CancellationToken ct) =>
+            await departments.FindByCodeAsync(code, ct) is { } departmentId
+                ? await UpsertExecutor(departmentId, id, request, balancer, ct)
+                : NoDepartment());
         // метрики дашборда для внешних систем — тот же отчёт, что в разделе «Аналитика»
-        group.MapGet("/metrics", async (string? period, AnalyticsService analytics, CancellationToken ct) =>
-            DashboardEndpoints.TryParsePeriod(period, out var parsed)
-                ? Results.Ok(await analytics.BuildAsync(parsed, ct))
-                : DashboardEndpoints.BadPeriod());
+        department.MapGet("/metrics", async (string code, string? period, DepartmentService departments,
+                AnalyticsService analytics, CancellationToken ct) =>
+            await departments.FindByCodeAsync(code, ct) is { } id
+                ? await Metrics(id, period, analytics, ct)
+                : NoDepartment());
         return app;
     }
 
-    private static async Task<IResult> ReceiveOrder(OrderRequest request, OrderBalancer balancer, CancellationToken ct)
+    private static IResult NoDepartment() =>
+        Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Отдел не найден");
+
+    private static async Task<IResult> Metrics(int departmentId, string? period, AnalyticsService analytics,
+        CancellationToken ct) =>
+        DashboardEndpoints.TryParsePeriod(period, out var parsed)
+            ? Results.Ok(await analytics.BuildAsync(departmentId, parsed, ct))
+            : DashboardEndpoints.BadPeriod();
+
+    private static async Task<IResult> ReceiveOrder(int departmentId, OrderRequest request, OrderBalancer balancer,
+        CancellationToken ct)
     {
         var errors = RequestValidation.Validate(request);
         if (errors.Count > 0)
@@ -45,7 +77,7 @@ public static class IntegrationEndpoints
         var incoming = new IncomingOrder(request.Id, request.ParentId, status, request.Attributes ?? NoAttributes);
         try
         {
-            var result = await balancer.ReceiveAsync(incoming, ct);
+            var result = await balancer.ReceiveAsync(departmentId, incoming, ct);
             return Results.Ok(result);
         }
         catch (InvalidInputException ex)
@@ -92,7 +124,7 @@ public static class IntegrationEndpoints
         });
     }
 
-    private static async Task<IResult> UpsertExecutor(long id, ExecutorRequest request, OrderBalancer balancer,
+    private static async Task<IResult> UpsertExecutor(int departmentId, long id, ExecutorRequest request, OrderBalancer balancer,
         CancellationToken ct)
     {
         var errors = RequestValidation.Validate(request);
@@ -108,7 +140,7 @@ public static class IntegrationEndpoints
 
         try
         {
-            await balancer.UpsertExecutorAsync(new IncomingExecutor(id, request.FullName!.Trim(), request.IsActive,
+            await balancer.UpsertExecutorAsync(departmentId, new IncomingExecutor(id, request.FullName!.Trim(), request.IsActive,
                 request.DailyLimit, request.QualificationWeight, request.Attributes ?? NoAttributes), ct);
             return Results.NoContent();
         }

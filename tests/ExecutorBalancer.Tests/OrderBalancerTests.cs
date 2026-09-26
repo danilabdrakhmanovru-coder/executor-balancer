@@ -391,7 +391,7 @@ public class OrderBalancerTests : IAsyncLifetime
         await _f.AddExecutor(2, qualification: 2m);
         await _f.Receive(1);
 
-        var preview = await _f.Run(b => b.PreviewAsync(null,
+        var preview = await _f.Run(b => b.PreviewAsync(D, null,
             BalancerFixture.Attributes(BalancerFixture.DefaultOrder()), CancellationToken.None));
         var before = (_f.Store.OpenCount(1), _f.Store.OpenCount(2));
         var actual = await _f.Receive(2);

@@ -189,13 +189,14 @@ public static class DomainPresets
 
     /// <summary>Сущности для базы: параметры, правила и правила веса шаблона.</summary>
     public static (List<FieldDefinition> Fields, List<Rule> Rules, List<WeightRule> WeightRules) Build(
-        DomainPreset preset, DateTimeOffset now)
+        DomainPreset preset, DateTimeOffset now, int departmentId)
     {
         var fields = preset.Fields
-            .Select(f => new FieldDefinition { Owner = f.Owner, Key = f.Key, Label = f.Label, Type = f.Type, Options = f.Options })
+            .Select(f => new FieldDefinition { DepartmentId = departmentId, Owner = f.Owner, Key = f.Key, Label = f.Label, Type = f.Type, Options = f.Options })
             .ToList();
         var rules = preset.Rules.Select((r, i) => new Rule
         {
+            DepartmentId = departmentId,
             Name = r.Name,
             Priority = (i + 1) * 10,
             OrderField = r.OrderField,
@@ -207,6 +208,7 @@ public static class DomainPresets
         }).ToList();
         var weightRules = preset.Weights.Select((w, i) => new WeightRule
         {
+            DepartmentId = departmentId,
             Priority = (i + 1) * 10,
             OrderField = w.OrderField,
             Operator = w.Operator,

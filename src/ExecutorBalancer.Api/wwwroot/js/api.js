@@ -4,6 +4,21 @@ const CSRF_HEADER = 'X-Requested-With';
 const CSRF_VALUE = 'executor-balancer';
 
 let unauthorizedHandler = () => {};
+let departmentId = null;
+
+/** Отдел, в рамках которого идут запросы интерфейса (выбирается в шапке). */
+export function setApiDepartment(id) { departmentId = id; }
+
+/**
+ * Адрес с отделом: запросы дашборда и конструктора относятся к выбранному отделу.
+ * Список отделов, вход и выход — общие.
+ */
+export function scoped(path) {
+  const own = (path.startsWith('/api/dashboard/') || path.startsWith('/api/admin/'))
+    && !path.startsWith('/api/admin/departments');
+  if (!own || departmentId === null) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}department=${encodeURIComponent(departmentId)}`;
+}
 
 export function onUnauthorized(handler) { unauthorizedHandler = handler; }
 
@@ -18,7 +33,7 @@ export class ApiError extends Error {
 export async function api(path, { method = 'GET', body } = {}) {
   const headers = { [CSRF_HEADER]: CSRF_VALUE };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, {
+  const response = await fetch(scoped(path), {
     method,
     credentials: 'same-origin',
     headers,

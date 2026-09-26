@@ -15,11 +15,12 @@ public static class DashboardEndpoints
 {
     public static IEndpointRouteBuilder MapDashboardEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/dashboard").WithTags("Дашборд").RequireAuthorization();
+        var group = app.MapGroup("/api/dashboard").WithTags("Дашборд").RequireAuthorization()
+            .AddEndpointFilter(DepartmentScope.RequireDepartment);
         group.MapGet("/summary", Summary);
         group.MapGet("/feed", Feed);
         group.MapGet("/orders/{id:long}", OrderDetails);
-        group.MapGet("/live", (AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(ct));
+        group.MapGet("/live", (DepartmentScope d, AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(d.Id, ct));
         group.MapGet("/analytics", Analytics);
         group.MapGet("/export.csv", Export);
         return app;
@@ -44,15 +45,15 @@ public static class DashboardEndpoints
         ["period"] = ["допустимо: today, 24h, 7d, 30d"],
     });
 
-    private static async Task<IResult> Analytics(string? period, AnalyticsService analytics, CancellationToken ct) =>
-        TryParsePeriod(period, out var parsed) ? Results.Ok(await analytics.BuildAsync(parsed, ct)) : BadPeriod();
+    private static async Task<IResult> Analytics(DepartmentScope d, string? period, AnalyticsService analytics, CancellationToken ct) =>
+        TryParsePeriod(period, out var parsed) ? Results.Ok(await analytics.BuildAsync(d.Id, parsed, ct)) : BadPeriod();
 
     /// <summary>
     /// Выгрузка для Excel: CSV в UTF-8 с BOM и разделителем «;» — так файл открывается в русском Excel
     /// двойным щелчком. Текстовые ячейки, начинающиеся с = + - @, экранируются: имя исполнителя приходит
     /// из внешней системы и не должно исполниться как формула.
     /// </summary>
-    private static async Task<IResult> Export(string? period, AnalyticsService analytics,
+    private static async Task<IResult> Export(DepartmentScope d, string? period, AnalyticsService analytics,
         IOptions<BalancerOptions> options, CancellationToken ct)
     {
         if (!TryParsePeriod(period, out var parsed))
@@ -60,7 +61,7 @@ public static class DashboardEndpoints
             return BadPeriod();
         }
 
-        var report = await analytics.BuildAsync(parsed, ct);
+        var report = await analytics.BuildAsync(d.Id, parsed, ct);
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var zone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
         var csv = new StringBuilder();
@@ -88,7 +89,7 @@ public static class DashboardEndpoints
         }
 
         var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
-        return Results.File(bytes, "text/csv; charset=utf-8", $"executor-balancer-{period ?? "today"}.csv");
+        return Results.File(bytes, "text/csv; charset=utf-8", $"executor-balancer-{d.Id}-{period ?? "today"}.csv");
 
         string Number(decimal? value) => value?.ToString(culture) ?? "";
         string Local(DateTimeOffset moment) =>
@@ -99,19 +100,20 @@ public static class DashboardEndpoints
             cell.IndexOfAny([';', '"', '\n', '\r']) >= 0 ? "\"" + cell.Replace("\"", "\"\"") + "\"" : cell;
     }
 
-    private static async Task<IResult> Summary(IBalancerDbContext db, ExecutorDirectory directory, ILoadStore loads,
+    private static async Task<IResult> Summary(DepartmentScope d, IBalancerDbContext db, ExecutorDirectory directory, ILoadStore loads,
         OrderBalancer balancer, AnalyticsService analytics, CancellationToken ct)
     {
-        var today = await analytics.BuildAsync(AnalyticsPeriod.Today, ct);
+        var today = await analytics.BuildAsync(d.Id, AnalyticsPeriod.Today, ct);
         var deviations = today.Executors.ToDictionary(e => e.Id, e => e.DeviationPercent);
-        var snapshot = await directory.GetAsync(ct);
+        var snapshot = await directory.GetAsync(d.Id, ct);
         var current = await loads.GetLoadsAsync(balancer.Today(), ct);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
 
-        var pending = await db.Orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId == null, ct);
-        var open = await db.Orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId != null, ct);
-        var lastHour = await db.Assignments.CountAsync(a => a.CreatedAt >= hourAgo, ct);
-        var total = await db.Orders.CountAsync(ct);
+        var orders = db.Orders.Where(o => o.DepartmentId == d.Id);
+        var pending = await orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId == null, ct);
+        var open = await orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId != null, ct);
+        var lastHour = await db.Assignments.CountAsync(a => a.DepartmentId == d.Id && a.CreatedAt >= hourAgo, ct);
+        var total = await orders.CountAsync(ct);
         var undelivered = await db.OutboxMessages.CountAsync(m => m.SentAt == null, ct);
 
         var executors = snapshot.Executors.Values
@@ -162,11 +164,11 @@ public static class DashboardEndpoints
         });
     }
 
-    private static async Task<IResult> Feed(long? after, IBalancerDbContext db, ExecutorDirectory directory,
+    private static async Task<IResult> Feed(DepartmentScope d, long? after, IBalancerDbContext db, ExecutorDirectory directory,
         CancellationToken ct)
     {
-        var snapshot = await directory.GetAsync(ct);
-        var query = db.Assignments.AsNoTracking();
+        var snapshot = await directory.GetAsync(d.Id, ct);
+        var query = db.Assignments.AsNoTracking().Where(a => a.DepartmentId == d.Id);
         if (after is { } afterId)
         {
             query = query.Where(a => a.Id > afterId);
@@ -217,9 +219,9 @@ public static class DashboardEndpoints
             .Select(f => Display(values[f.Key])));
     }
 
-    private static async Task<IResult> OrderDetails(long id, IBalancerDbContext db, CancellationToken ct)
+    private static async Task<IResult> OrderDetails(DepartmentScope d, long id, IBalancerDbContext db, CancellationToken ct)
     {
-        var order = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id, ct);
+        var order = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id && o.DepartmentId == d.Id, ct);
         if (order is null)
         {
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Заявка не найдена");

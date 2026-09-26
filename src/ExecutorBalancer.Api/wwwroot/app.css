@@ -55,6 +55,16 @@ code { font-size: 12px; }
 }
 .app-tabs .nav-link:hover { color: var(--tblr-body-color); }
 .app-tabs .nav-link.active { color: var(--tblr-primary); border-bottom-color: var(--tblr-primary); }
+/* пульт имитации — справа и приглушённо: это не часть продукта, а подмена внешней системы */
+.app-tabs .tab-demo { margin-left: auto; font-style: italic; }
+.settings-nav { flex-wrap: wrap; margin-bottom: 16px; }
+.settings-nav .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* переключатель отдела */
+.dept-switch { display: flex; align-items: center; gap: 8px; margin-left: 24px; min-width: 0; }
+.dept-label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.dept-switch .form-select { width: auto; max-width: 260px; font-weight: 600; }
+.dept-sphere { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
 
 /* плитки */
 .tiles .card-body { padding: 14px 16px; }
@@ -180,6 +190,11 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .skills dd { margin: 0; overflow-wrap: anywhere; }
 
 @media (max-width: 640px) {
+  .brand-sub { display: none; }
+  /* отдел — отдельной строкой под логотипом, во всю ширину */
+  .app-header .container-xl { flex-wrap: wrap; }
+  .dept-switch { order: 3; width: 100%; margin: 8px 0 0; }
+  .dept-switch .form-select { max-width: none; flex: 1; }
   .tile-value { font-size: 22px; }
   .lookup { width: 150px; }
 }

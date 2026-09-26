@@ -70,6 +70,11 @@ sequenceDiagram
 
 ```mermaid
 erDiagram
+    departments ||--o{ executors : "сотрудники отдела"
+    departments ||--o{ orders : "заявки отдела"
+    departments ||--o{ field_definitions : "свой справочник"
+    departments ||--o{ rules : "свои правила"
+    departments ||--o{ weight_rules : "свои веса"
     executors ||--o{ assignments : "получает"
     orders ||--o{ assignments : "история решений"
     orders ||--o{ outbox_messages : "доставка в АИС"
@@ -78,8 +83,15 @@ erDiagram
     field_definitions ||..o{ rules : "поля правил (по ключу)"
     field_definitions ||..o{ weight_rules : "поле условия (по ключу)"
 
+    departments {
+        int Id PK "1 — основной (общие адреса API)"
+        varchar Code "уникален; адрес /departments/{code}/…"
+        varchar Name
+        varchar PresetId "шаблон сферы"
+    }
     executors {
         bigint Id PK "id из АИС"
+        int DepartmentId FK
         varchar FullName
         bool IsActive
         int DailyLimit "null — без лимита"
@@ -88,6 +100,7 @@ erDiagram
     }
     orders {
         bigint Id PK "id из АИС"
+        int DepartmentId FK
         bigint ParentId
         varchar Status "processed / await / accept / reject"
         numeric Weight
@@ -113,8 +126,9 @@ erDiagram
     }
     field_definitions {
         int Id PK
+        int DepartmentId FK
         varchar Owner "Order / Executor"
-        varchar Key "уникален с Owner"
+        varchar Key "уникален с отделом и Owner"
         varchar Type "String / Number / Boolean / Enum / Array"
         text Options "справочник"
     }
@@ -148,6 +162,7 @@ erDiagram
         int ReturnedCount
     }
     eligibility_hour_stats {
+        int DepartmentId PK
         bigint BucketHour PK
         varchar SetKey PK "кто мог взять: 1,4,7"
         int Count
@@ -155,11 +170,21 @@ erDiagram
     }
     audit_entries {
         bigint Id PK
+        int DepartmentId "null — общее: входы, отделы"
         varchar Action
         varchar Entity
         jsonb DataJson "до и после"
     }
 ```
+
+### Отделы
+
+Отдел — независимое пространство: справочник параметров, правила, веса, сотрудники, заявки и отчёты
+фильтруются по `DepartmentId`. Снимок конфигурации в `ExecutorDirectory` строится на отдел; версия
+конфигурации в Redis общая — любое изменение перечитывает снимки всех отделов (изменения редкие).
+Нагрузка в Redis хранится по ID исполнителя: идентификаторы в АИС общие, а исполнитель состоит в одном
+отделе, поэтому ключи Lua-скриптов не меняются. Перевод исполнителя в другой отдел, как и деактивация,
+перераспределяет его открытые заявки внутри их отдела.
 
 ## Алгоритм
 

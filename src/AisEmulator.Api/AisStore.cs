@@ -5,6 +5,10 @@ namespace AisEmulator.Api;
 public sealed class AisExecutor
 {
     public long Id { get; init; }
+
+    /// <summary>Код отдела балансировщика; null — основной отдел (старые адреса API).</summary>
+    public string? Department { get; set; }
+
     public string FullName { get; set; } = "";
     public bool IsActive { get; set; }
     public int? DailyLimit { get; set; }
@@ -15,6 +19,7 @@ public sealed class AisExecutor
 public sealed class AisOrder
 {
     public long Id { get; init; }
+    public string? Department { get; init; }
     public long? ParentId { get; init; }
     public string Status { get; set; } = "processed";
     public Dictionary<string, JsonElement> Attributes { get; init; } = new();
@@ -35,6 +40,9 @@ public sealed class AisOrder
 public sealed class AisStore
 {
     public static readonly string[] Statuses = ["processed", "await", "accept", "reject"];
+
+    /// <summary>Фильтр «без отдела» (основной отдел по старым адресам); null в фильтре — все отделы.</summary>
+    public const string NoDepartment = "";
 
     private readonly object _gate = new();
     private readonly Dictionary<long, AisExecutor> _executors = new();
@@ -67,15 +75,16 @@ public sealed class AisStore
         }
     }
 
-    public List<AisExecutor> Executors()
+    public List<AisExecutor> Executors(string? department = null)
     {
         lock (_gate)
         {
-            return _executors.Values.OrderBy(e => e.Id).Select(Copy).ToList();
+            return _executors.Values.Where(e => department is null || (e.Department ?? NoDepartment) == department)
+                .OrderBy(e => e.Id).Select(Copy).ToList();
         }
     }
 
-    public AisOrder CreateOrder(long? parentId, Dictionary<string, JsonElement> attributes)
+    public AisOrder CreateOrder(string? department, long? parentId, Dictionary<string, JsonElement> attributes)
     {
         lock (_gate)
         {
@@ -83,6 +92,7 @@ public sealed class AisStore
             var order = new AisOrder
             {
                 Id = ++_nextOrderId,
+                Department = department,
                 ParentId = parentId,
                 Attributes = attributes,
                 CreatedAt = now,
@@ -101,11 +111,12 @@ public sealed class AisStore
         }
     }
 
-    public List<AisOrder> Orders(string? status, bool? assigned, int limit)
+    public List<AisOrder> Orders(string? status, bool? assigned, int limit, string? department = null)
     {
         lock (_gate)
         {
             return _orders.Values
+                .Where(o => department is null || (o.Department ?? NoDepartment) == department)
                 .Where(o => status is null || o.Status == status)
                 .Where(o => assigned is null || (o.ExecutorId is not null) == assigned)
                 .OrderByDescending(o => o.Id)
@@ -153,17 +164,20 @@ public sealed class AisStore
         }
     }
 
-    public object Stats()
+    /// <summary>Сводка по отделу (null — по всей АИС).</summary>
+    public object Stats(string? department = null)
     {
         lock (_gate)
         {
+            var executors = _executors.Values.Where(e => department is null || (e.Department ?? NoDepartment) == department).ToList();
+            var orders = _orders.Values.Where(o => department is null || (o.Department ?? NoDepartment) == department).ToList();
             return new
             {
-                Executors = _executors.Count,
-                ActiveExecutors = _executors.Values.Count(e => e.IsActive),
-                Orders = _orders.Count,
-                ByStatus = Statuses.ToDictionary(s => s, s => _orders.Values.Count(o => o.Status == s)),
-                ProcessedWithoutExecutor = _orders.Values.Count(o => o.Status == "processed" && o.ExecutorId is null),
+                Executors = executors.Count,
+                ActiveExecutors = executors.Count(e => e.IsActive),
+                Orders = orders.Count,
+                ByStatus = Statuses.ToDictionary(s => s, s => orders.Count(o => o.Status == s)),
+                ProcessedWithoutExecutor = orders.Count(o => o.Status == "processed" && o.ExecutorId is null),
                 StaleAssignmentsIgnored = StaleAssignments,
             };
         }
@@ -172,6 +186,7 @@ public sealed class AisStore
     private static AisExecutor Copy(AisExecutor e) => new()
     {
         Id = e.Id,
+        Department = e.Department,
         FullName = e.FullName,
         IsActive = e.IsActive,
         DailyLimit = e.DailyLimit,
@@ -182,6 +197,7 @@ public sealed class AisStore
     private static AisOrder Copy(AisOrder o) => new()
     {
         Id = o.Id,
+        Department = o.Department,
         ParentId = o.ParentId,
         Status = o.Status,
         Attributes = o.Attributes,

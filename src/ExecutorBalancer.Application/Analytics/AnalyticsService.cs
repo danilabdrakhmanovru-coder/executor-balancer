@@ -89,7 +89,8 @@ public sealed class AnalyticsService(
 
     private readonly TimeZoneInfo _timeZone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
 
-    public async Task<AnalyticsReport> BuildAsync(AnalyticsPeriod period, CancellationToken cancellationToken)
+    public async Task<AnalyticsReport> BuildAsync(int departmentId, AnalyticsPeriod period,
+        CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
         var currentHour = ExecutorStats.HourOf(now);
@@ -109,10 +110,10 @@ public sealed class AnalyticsService(
         var fromHour = firstKey * size - offset;
 
         var rows = await db.ExecutorHourStats.AsNoTracking()
-            .Where(s => s.BucketHour >= fromHour && s.BucketHour <= currentHour)
+            .Where(s => s.DepartmentId == departmentId && s.BucketHour >= fromHour && s.BucketHour <= currentHour)
             .ToListAsync(cancellationToken);
         var pools = await db.EligibilityHourStats.AsNoTracking()
-            .Where(s => s.BucketHour >= fromHour && s.BucketHour <= currentHour)
+            .Where(s => s.DepartmentId == departmentId && s.BucketHour >= fromHour && s.BucketHour <= currentHour)
             .ToListAsync(cancellationToken);
 
         var timeline = new TimelinePoint[count];
@@ -134,7 +135,7 @@ public sealed class AnalyticsService(
             };
         }
 
-        var snapshot = await directory.GetAsync(cancellationToken);
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
         var qualification = snapshot.Executors.ToDictionary(e => e.Key, e => e.Value.QualificationWeight);
         var capped = LimitReached(rows, snapshot, offset, size);
         var fair = new Dictionary<long, decimal>();
@@ -175,7 +176,7 @@ public sealed class AnalyticsService(
     }
 
     /// <summary>Назначения по минутам за последние полчаса — для живого графика на обзоре.</summary>
-    public async Task<IReadOnlyList<LivePoint>> LiveAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<LivePoint>> LiveAsync(int departmentId, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
         var lastMinute = FloorDiv(now.ToUnixTimeSeconds(), 60);
@@ -183,7 +184,7 @@ public sealed class AnalyticsService(
         var from = DateTimeOffset.FromUnixTimeSeconds(firstMinute * 60);
 
         var moments = await db.Assignments.AsNoTracking()
-            .Where(a => a.CreatedAt >= from)
+            .Where(a => a.DepartmentId == departmentId && a.CreatedAt >= from)
             .Select(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
 

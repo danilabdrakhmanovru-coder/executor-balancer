@@ -21,8 +21,11 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 
 ## Интерфейс
 
-`wwwroot/js`: `main.js` — вкладки; по файлу на вкладку (`demo.js`, `overview.js`, `executors.js`, `analytics.js`,
-`constructor.js`, `preview.js`, `audit.js`); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
+Всё делится на отделы (`Department`, `DepartmentId` у настроек, исполнителей, заявок, статистики): отдел выбирается
+в шапке (`department.js`), `api.js` сам добавляет `?department=` к `/api/dashboard` и `/api/admin`, на сервере —
+`DepartmentScope` + фильтр `RequireDepartment`. Любой новый запрос к данным — с фильтром по отделу.
+`wwwroot/js`: `main.js` — вкладки; по файлу на вкладку (`overview.js` — Мониторинг, `executors.js`, `analytics.js`,
+`constructor.js`, `preview.js`, `departments.js`, `audit.js`, `demo.js` — Имитация АИС); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
 `editor.js` (диалог), `charts.js`, `explain.js`, `presets.js`. Пульт демонстрации — `Endpoints/DemoEndpoints.cs`
 (прокси к эмулятору), генератор и симуляция — `src/AisEmulator.Api/Simulation`, шаблоны сфер —
 `Application/Configuration/DomainPresets.cs`.

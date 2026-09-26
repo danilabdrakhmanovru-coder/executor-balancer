@@ -8,6 +8,8 @@ const ACTION = {
   rule_created: ['Новое правило', ''], rule_updated: ['Правило изменено', ''], rule_deleted: ['Правило удалено', 'bad'],
   weight_rule_created: ['Новое правило веса', ''], weight_rule_updated: ['Правило веса изменено', ''],
   weight_rule_deleted: ['Правило веса удалено', 'bad'],
+  department_created: ['Новый отдел', 'ok'], department_renamed: ['Отдел переименован', ''],
+  department_deleted: ['Отдел удалён', 'bad'],
 };
 const TYPE = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
 const OWNER = { Order: 'заявки', Executor: 'сотрудника' };
@@ -83,6 +85,10 @@ function describe(entry) {
         : Array.isArray(before.fields) ? ` Было: своя настройка — параметров ${before.fields.length}, правил ${(before.rules || []).length}.` : '';
       return `Применён шаблон ${quote(after.preset)}: параметров ${(after.fields || []).length}, правил ${(after.rules || []).length}.${was}`;
     }
+    case 'department_created':
+      return `Создан отдел ${quote(after.name)}${after.preset ? ` — сфера ${quote(after.preset)}` : ' без шаблона'}, код для АИС: ${after.code}`;
+    case 'department_renamed': return `Отдел ${quote(before.name)} переименован в ${quote(after.name)}`;
+    case 'department_deleted': return `Удалён отдел ${quote(before.name)}`;
     case 'field_created':
       return `Добавлен параметр ${OWNER[after.owner] || ''} ${quote(after.label)} — ${TYPE[after.type] || after.type}`
         + `${after.options?.length ? `: ${after.options.join(', ')}` : ''}`;
@@ -127,6 +133,9 @@ async function load(append) {
 }
 
 export const refreshAudit = () => load(false);
+
+/** Другой отдел — другие названия параметров в описаниях. */
+export function resetAudit() { config = null; oldest = null; }
 
 export function initAudit() {
   $('audit-refresh').addEventListener('click', () => load(false));

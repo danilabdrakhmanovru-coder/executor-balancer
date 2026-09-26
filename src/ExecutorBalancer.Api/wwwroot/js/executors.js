@@ -93,8 +93,8 @@ export async function refreshExecutors() {
   if (!summary.executors.length) {
     const empty = el('div', null, 'card card-body');
     empty.append(el('p', demoEnabled
-      ? 'Исполнителей пока нет. Заведите их на вкладке «Демонстрация» (шаг 2) — или их передаст АИС.'
-      : 'Исполнителей пока нет — их передаёт АИС.', 'muted'));
+      ? 'В отделе пока нет сотрудников. Заведите их на вкладке «Имитация АИС» (шаг 1) — или их передаст АИС.'
+      : 'В отделе пока нет сотрудников — их передаёт АИС.', 'muted'));
     list.replaceChildren(empty);
     return;
   }

@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddSingleton<ExecutorDirectory>();
         services.AddScoped<OrderBalancer>();
         services.AddScoped<ConfigurationService>();
+        services.AddScoped<DepartmentService>();
         services.AddScoped<AnalyticsService>();
         return services;
     }
