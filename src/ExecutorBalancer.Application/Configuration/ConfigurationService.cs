@@ -78,6 +78,71 @@ public sealed class ConfigurationService(
             .ToList();
     }
 
+    // ---------- шаблоны сфер ----------
+
+    /// <summary>Шаблоны и признак «сейчас применён»: все параметры шаблона есть в справочнике.</summary>
+    public async Task<IReadOnlyList<PresetView>> GetPresetsAsync(CancellationToken cancellationToken)
+    {
+        var keys = (await db.FieldDefinitions.AsNoTracking().Select(f => new { f.Owner, f.Key }).ToListAsync(cancellationToken))
+            .Select(f => (f.Owner, f.Key))
+            .ToHashSet();
+        return DomainPresets.All
+            .Select(p => new PresetView(p.Id, p.Title, p.Description,
+                p.Fields.Where(f => f.Owner == FieldOwner.Order).Select(f => f.Label).ToArray(),
+                p.Fields.Where(f => f.Owner == FieldOwner.Executor).Select(f => f.Label).ToArray(),
+                p.Fields.All(f => keys.Contains((f.Owner, f.Key)))))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Заменяет параметры, правила и веса на набор из шаблона — одной транзакцией и одной записью журнала.
+    /// Заявки и исполнители не трогаются: их параметры хранятся целиком и начнут учитываться, когда появятся
+    /// соответствующие поля.
+    /// </summary>
+    public async Task ApplyPresetAsync(string id, CancellationToken cancellationToken)
+    {
+        var preset = DomainPresets.Find(id)
+                     ?? throw new InvalidInputException(new Dictionary<string, string[]> { ["preset"] = ["неизвестный шаблон"] });
+
+        var before = new
+        {
+            Fields = await db.FieldDefinitions.AsNoTracking().OrderBy(f => f.Id).Select(f => f.Key).ToListAsync(cancellationToken),
+            Rules = await db.Rules.AsNoTracking().OrderBy(r => r.Id).Select(r => r.Name).ToListAsync(cancellationToken),
+        };
+        var (fields, rules, weightRules) = DomainPresets.Build(preset, clock.GetUtcNow());
+
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            db.Rules.RemoveRange(await db.Rules.ToListAsync(cancellationToken));
+            db.WeightRules.RemoveRange(await db.WeightRules.ToListAsync(cancellationToken));
+            db.FieldDefinitions.RemoveRange(await db.FieldDefinitions.ToListAsync(cancellationToken));
+            await db.SaveChangesAsync(cancellationToken);
+
+            db.FieldDefinitions.AddRange(fields);
+            db.Rules.AddRange(rules);
+            db.WeightRules.AddRange(weightRules);
+            db.AuditEntries.Add(new AuditEntry
+            {
+                Actor = Actor,
+                Action = "preset_applied",
+                Entity = "preset",
+                EntityId = preset.Id,
+                DataJson = JsonSerializer.Serialize(new
+                {
+                    before,
+                    after = new { Preset = preset.Title, Fields = fields.Select(f => f.Key), Rules = rules.Select(r => r.Name) },
+                }, AuditJson),
+                CreatedAt = clock.GetUtcNow(),
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await loadStore.BumpConfigVersionAsync(cancellationToken);
+        directory.Invalidate();
+        logger.LogInformation("Применён шаблон «{Preset}»", preset.Title);
+    }
+
     // ---------- параметры ----------
 
     public async Task<FieldView> CreateFieldAsync(FieldInput input, CancellationToken cancellationToken)

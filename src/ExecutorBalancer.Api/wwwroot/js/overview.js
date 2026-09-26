@@ -10,21 +10,20 @@ let liveLoadedAt = 0;
 function renderTiles(t, fairness) {
   const mean = fairness?.meanAbsDeviationPercent;
   const tiles = [
-    ['Заявок всего', fmt(t.orders)],
-    ['В работе', fmt(t.open)],
-    ['Ожидают исполнителя', fmt(t.pending), t.pending > 0],
-    ['Назначено за час', fmt(t.assignedLastHour)],
-    ['Решено сегодня', fmt(t.closedToday)],
-    ['Не доставлено в АИС', fmt(t.undelivered), t.undelivered > 50],
-    ['Активных исполнителей', fmt(t.activeExecutors)],
+    ['Заявок всего', fmt(t.orders), 'пришло из АИС'],
+    ['В работе', fmt(t.open), 'назначены и ещё не решены'],
+    ['Ожидают исполнителя', fmt(t.pending), t.pending > 0 ? 'нет свободного подходящего — повтор каждые 5 с' : 'никто не ждёт', t.pending > 0],
+    ['Назначено за час', fmt(t.assignedLastHour), 'включая возвраты с доработки'],
+    ['Решено сегодня', fmt(t.closedToday), 'решено и отклонено'],
+    ['Не доставлено в АИС', fmt(t.undelivered), t.undelivered > 0 ? 'в очереди на отправку, с повторами' : 'все назначения у АИС', t.undelivered > 50],
+    ['Сотрудников на работе', fmt(t.activeExecutors), 'участвуют в распределении'],
     ['Отклонение от справедливой доли', mean === null || mean === undefined ? '—' : `${fmt(mean)}%`,
-      mean !== null && mean !== undefined && mean > 2,
-      'Среднее за сегодня по всем исполнителям: Σ|факт − справедливая доля| / Σ справедливых долей'],
+      'насколько распределение за сегодня отличается от идеально ровного; норма — до 2%',
+      mean !== null && mean !== undefined && mean > 2],
   ];
-  $('tiles').replaceChildren(...tiles.map(([label, value, warn, title]) => {
+  $('tiles').replaceChildren(...tiles.map(([label, value, hint, warn]) => {
     const tile = el('div', null, `tile${warn ? ' warn' : ''}`);
-    if (title) tile.title = title;
-    tile.append(el('div', label, 'muted'), el('div', value, 'value'));
+    tile.append(el('div', label, 'muted'), el('div', value, 'value'), el('div', hint, 'tile-hint'));
     return tile;
   }));
 }

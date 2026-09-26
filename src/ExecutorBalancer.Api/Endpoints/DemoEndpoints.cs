@@ -1,0 +1,235 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using ExecutorBalancer.Api.Contracts;
+using ExecutorBalancer.Api.Security;
+using ExecutorBalancer.Application.Balancing;
+using ExecutorBalancer.Application.Configuration;
+using ExecutorBalancer.Domain;
+using ExecutorBalancer.Infrastructure.Workers;
+using Microsoft.Extensions.Options;
+
+namespace ExecutorBalancer.Api.Endpoints;
+
+public sealed class DemoOptions
+{
+    public const string Section = "Demo";
+
+    /// <summary>Пульт демонстрации: управление эмулятором АИС из интерфейса. В боевом окружении выключен.</summary>
+    public bool Enabled { get; set; }
+}
+
+public sealed record SeedRequest(int Count);
+
+public sealed record SimulationStartRequest(double RatePerHour);
+
+public sealed record ActiveRequest(bool IsActive);
+
+public sealed record DemoOrderRequest(long? ParentId, Dictionary<string, JsonElement>? Attributes);
+
+/// <summary>
+/// Пульт демонстрации. Браузер обращается только к балансировщику, а тот — к эмулятору АИС со своим ключом:
+/// ключ АИС на страницу не попадает. Данные исполнителей и заявок проверяются по справочнику параметров
+/// до отправки в АИС — иначе АИС приняла бы то, что потом отклонит балансировщик.
+/// </summary>
+public static class DemoEndpoints
+{
+    public const int MaxSeedCount = 50;
+    public const double MaxRatePerHour = 72_000;
+
+    private static readonly int?[] DailyLimits = [null, null, 60, 80, 120, 200];
+    private static readonly decimal[] Qualifications = [0.8m, 1m, 1m, 1.2m, 1.5m, 2m];
+
+    public static IEndpointRouteBuilder MapDemoEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/admin/demo")
+            .WithTags("Демонстрация")
+            .RequireAuthorization()
+            .AddEndpointFilter<CsrfHeaderFilter>()
+            .AddEndpointFilter(async (context, next) =>
+                context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled
+                    ? await next(context)
+                    : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"));
+
+        group.MapGet("/status", async (IHttpClientFactory http, CancellationToken ct) =>
+        {
+            var client = http.CreateClient(AisOptions.HttpClientName);
+            var simulation = await Relay(client, HttpMethod.Get, "api/ais/simulation", null, ct);
+            if (simulation.Error is not null)
+            {
+                return simulation.Error;
+            }
+
+            var stats = await Relay(client, HttpMethod.Get, "api/ais/stats", null, ct);
+            return stats.Error ?? Results.Ok(new { Simulation = simulation.Body, Ais = stats.Body });
+        });
+
+        group.MapGet("/executors", async (IHttpClientFactory http, CancellationToken ct) =>
+            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Get, "api/ais/executors", null, ct)).Result);
+
+        group.MapPost("/executors/seed", async (SeedRequest request, IHttpClientFactory http, ExecutorDirectory directory,
+            CancellationToken ct) =>
+        {
+            if (request.Count is < 1 or > MaxSeedCount)
+            {
+                return Invalid("count", $"от 1 до {MaxSeedCount}");
+            }
+
+            var snapshot = await directory.GetAsync(ct);
+            var body = new
+            {
+                request.Count,
+                Fields = Specs(snapshot, FieldOwner.Executor),
+                Names = DomainPresets.ExecutorNames,
+                DailyLimits,
+                Qualifications,
+            };
+            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/executors/seed", body, ct)).Result;
+        });
+
+        group.MapPut("/executors/{id:long}", async (long id, ExecutorRequest request, IHttpClientFactory http,
+            ExecutorDirectory directory, CancellationToken ct) =>
+        {
+            var errors = RequestValidation.Validate(request);
+            if (id <= 0)
+            {
+                errors["id"] = ["должен быть положительным"];
+            }
+
+            if (errors.Count == 0 && request.Attributes is not null)
+            {
+                (await directory.GetAsync(ct)).Catalog.Parse(FieldOwner.Executor, request.Attributes, errors);
+            }
+
+            if (errors.Count > 0)
+            {
+                return Results.ValidationProblem(errors);
+            }
+
+            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Put, $"api/ais/executors/{id}",
+                request with { FullName = request.FullName!.Trim() }, ct)).Result;
+        });
+
+        group.MapPost("/executors/{id:long}/active", async (long id, ActiveRequest request, IHttpClientFactory http,
+            CancellationToken ct) =>
+            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, $"api/ais/executors/{id}/active",
+                request, ct)).Result);
+
+        group.MapPost("/simulation/start", async (SimulationStartRequest request, IHttpClientFactory http,
+            ExecutorDirectory directory, CancellationToken ct) =>
+        {
+            if (request.RatePerHour is < 1 or > MaxRatePerHour || double.IsNaN(request.RatePerHour))
+            {
+                return Invalid("ratePerHour", $"от 1 до {MaxRatePerHour} заявок в час");
+            }
+
+            var snapshot = await directory.GetAsync(ct);
+            var body = new { request.RatePerHour, OrderFields = Specs(snapshot, FieldOwner.Order) };
+            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/start", body, ct)).Result;
+        });
+
+        group.MapPost("/simulation/stop", async (IHttpClientFactory http, CancellationToken ct) =>
+            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/stop", new { }, ct)).Result);
+
+        group.MapPost("/orders", async (DemoOrderRequest request, IHttpClientFactory http, ExecutorDirectory directory,
+            CancellationToken ct) =>
+        {
+            var errors = new Dictionary<string, string[]>();
+            if (request.ParentId is <= 0)
+            {
+                errors["parentId"] = ["должен быть положительным"];
+            }
+
+            RequestValidation.ValidateAttributes(request.Attributes, errors);
+            if (errors.Count == 0 && request.Attributes is not null)
+            {
+                (await directory.GetAsync(ct)).Catalog.Parse(FieldOwner.Order, request.Attributes, errors);
+            }
+
+            if (errors.Count > 0)
+            {
+                return Results.ValidationProblem(errors);
+            }
+
+            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/orders",
+                new { request.ParentId, Attributes = request.Attributes ?? new() }, ct)).Result;
+        });
+
+        return app;
+    }
+
+    /// <summary>
+    /// Как генерировать значения параметров: по справочнику, с подсказками из шаблонов сфер.
+    /// Параметр, заведённый в конструкторе, генератор начинает заполнять сразу.
+    /// </summary>
+    private static List<object> Specs(BalancerSnapshot snapshot, FieldOwner owner) =>
+        snapshot.Catalog.All
+            .Where(f => f.Owner == owner)
+            .OrderBy(f => f.Id)
+            .Select(f =>
+            {
+                var hint = DomainPresets.Hint(f.Owner, f.Key);
+                return (object)new
+                {
+                    f.Key,
+                    Type = f.Type.ToString(),
+                    f.Options,
+                    hint?.Weights,
+                    Min = hint?.Min ?? (f.Type == FieldType.Number ? 0 : null),
+                    Max = hint?.Max ?? (f.Type == FieldType.Number ? 100 : null),
+                    hint?.Choices,
+                    LogScale = hint?.LogScale ?? false,
+                    hint?.Probability,
+                    MinItems = hint?.MinItems ?? (f.Type == FieldType.Array ? Math.Max(1, (f.Options.Length + 1) / 2) : null),
+                    hint?.MaxItems,
+                    hint?.Required,
+                };
+            })
+            .ToList();
+
+    private sealed record Relayed(JsonElement? Body, IResult? Error)
+    {
+        public IResult Result => Error ?? Results.Ok(Body);
+    }
+
+    private static async Task<Relayed> Relay(HttpClient client, HttpMethod method, string path, object? body,
+        CancellationToken ct)
+    {
+        if (client.BaseAddress is null)
+        {
+            return new(null, Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Адрес АИС не задан (Ais:BaseUrl)"));
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(method, path);
+            if (body is not null)
+            {
+                request.Content = JsonContent.Create(body);
+            }
+
+            using var response = await client.SendAsync(request, ct);
+            var json = response.Content.Headers.ContentLength == 0
+                ? (JsonElement?)null
+                : await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+            if (response.IsSuccessStatusCode)
+            {
+                return new(json, null);
+            }
+
+            var title = json is { ValueKind: JsonValueKind.Object } problem && problem.TryGetProperty("title", out var t)
+                ? t.GetString()
+                : null;
+            return new(null, Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "АИС отклонила запрос",
+                detail: title ?? $"HTTP {(int)response.StatusCode}"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException
+                                   && !ct.IsCancellationRequested)
+        {
+            return new(null, Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "АИС недоступна",
+                detail: "Проверьте, что эмулятор АИС запущен"));
+        }
+    }
+
+    private static IResult Invalid(string field, string message) =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [message] });
+}

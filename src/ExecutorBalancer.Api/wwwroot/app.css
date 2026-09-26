@@ -69,7 +69,7 @@ main { max-width: 1440px; margin: 0 auto; padding: 20px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 td { white-space: nowrap; }
-.wrap-text { display: block; white-space: normal; min-width: 240px; max-width: 640px; overflow-wrap: anywhere; }
+.wrap-text { display: block; white-space: normal; min-width: 180px; max-width: 640px; overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--card); z-index: 1; white-space: nowrap; }
 th.wide { width: 30%; }
 td.empty { text-align: center; padding: 18px; white-space: normal; }
@@ -145,3 +145,56 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
   .tab { flex: 1 1 auto; padding: 7px 8px; }
   .tile .value { font-size: 22px; }
 }
+
+/* пояснения и демонстрация */
+.intro p { margin: 8px 0 0; line-height: 1.5; max-width: 110ch; }
+.tile-hint { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.35; }
+.fine { font-size: 12px; margin: 4px 0 0; color: var(--muted); }
+.warn-text { color: var(--warn); }
+.step-no {
+  display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 13px; margin-right: 8px;
+}
+.rate { font-size: 15px; margin: 8px 0 12px; }
+input[type="range"] { width: 100%; padding: 0; accent-color: var(--accent); }
+
+.flow { display: flex; align-items: stretch; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.stage {
+  flex: 1 1 0; min-width: 150px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; position: relative;
+}
+.stage.live { border-color: var(--accent); }
+.stage.warn .stage-note { color: var(--warn); }
+.stage-no { position: absolute; top: 8px; right: 10px; color: var(--muted); font-size: 12px; }
+.stage-title { color: var(--muted); font-size: 13px; padding-right: 14px; min-height: 2.6em; }
+.stage-value { font-size: 22px; font-weight: 600; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+.stage-note { font-size: 12px; color: var(--muted); }
+.stage-arrow { align-self: center; color: var(--muted); font-size: 20px; }
+.flow.running .stage.live { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 3px rgba(79, 140, 255, .25); } }
+@media (max-width: 900px) { .flow { flex-direction: column; } .stage-arrow { transform: rotate(90deg); } }
+
+.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.preset { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 6px; align-content: start; }
+.preset.current { border-color: var(--ok); }
+.preset p { margin: 0; line-height: 1.4; }
+.preset button { justify-self: start; margin-top: 4px; }
+.preset-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+.feed { display: grid; gap: 4px; }
+.feed-item {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; text-align: left; width: 100%;
+  background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 8px; padding: 6px 8px;
+}
+.feed-item:hover { border-color: var(--line); background: var(--card-2); }
+.feed-id { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 56px; }
+.feed-what { color: var(--accent-2); }
+
+.executors-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.executor { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; align-content: start; }
+.executor.off { opacity: .6; }
+.executor-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.executor-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 13px; }
+.skills { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.skills dt { color: var(--muted); }
+.skills dd { margin: 0; overflow-wrap: anywhere; }

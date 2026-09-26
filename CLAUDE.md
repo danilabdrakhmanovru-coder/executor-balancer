@@ -19,6 +19,14 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 - Сквозной запуск: `docker compose up -d --build`, затем `python tools/loadgen.py --setup` и
   `python tools/loadgen.py --rate 4000 --duration 300 --chaos`.
 
+## Интерфейс
+
+`wwwroot/js`: `main.js` — вкладки; по файлу на вкладку (`demo.js`, `overview.js`, `executors.js`, `analytics.js`,
+`constructor.js`, `preview.js`, `audit.js`); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
+`editor.js` (диалог), `charts.js`, `explain.js`, `presets.js`. Пульт демонстрации — `Endpoints/DemoEndpoints.cs`
+(прокси к эмулятору), генератор и симуляция — `src/AisEmulator.Api/Simulation`, шаблоны сфер —
+`Application/Configuration/DomainPresets.cs`.
+
 ## Правила кода
 
 - Безопасность — требование кейса: никаких `eval`, только белый список операторов; в интерфейсе данные

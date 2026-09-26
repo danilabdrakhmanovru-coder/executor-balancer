@@ -1,6 +1,7 @@
 // Конструктор: параметры заявки и исполнителя, правила подбора, правила веса.
 // Интерфейс подсказывает допустимые сочетания, но окончательная проверка — на сервере.
 import { api, problemText } from './api.js';
+import { openEditor as openShared } from './editor.js';
 import { $, el, row, badge, button, actions, fmt, toast, field, input, select, checkbox, emptyRow } from './dom.js';
 
 const TYPE_LABEL = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
@@ -104,32 +105,8 @@ export function currentConfig() { return config; }
 
 // ---------- диалог ----------
 
-let submitHandler = null;
-
 function openEditor(title, nodes, onSubmit) {
-  $('editor-title').textContent = title;
-  $('editor-body').replaceChildren(...nodes);
-  $('editor-error').textContent = '';
-  submitHandler = onSubmit;
-  $('editor').showModal();
-}
-
-async function submitEditor(event) {
-  event.preventDefault();
-  if (!submitHandler) return;
-  const save = $('editor-save');
-  save.disabled = true;
-  $('editor-error').textContent = '';
-  try {
-    await submitHandler();
-    $('editor').close();
-    await refreshConstructor();
-    onChanged();
-  } catch (e) {
-    $('editor-error').textContent = e instanceof Error && !('status' in e) ? e.message : problemText(e);
-  } finally {
-    save.disabled = false;
-  }
+  openShared(title, nodes, onSubmit, async () => { await refreshConstructor(); onChanged(); });
 }
 
 async function mutate(promise, success) {
@@ -445,6 +422,4 @@ export function initConstructor(changed) {
   }
   $('add-rule').addEventListener('click', () => editRule(null));
   $('add-weight-rule').addEventListener('click', () => editWeightRule(null));
-  $('editor-form').addEventListener('submit', submitEditor);
-  $('editor-close').addEventListener('click', () => $('editor').close());
 }

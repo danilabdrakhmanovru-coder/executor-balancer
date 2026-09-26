@@ -1,0 +1,174 @@
+// Демонстрация: пошаговый пульт (сфера → исполнители → поток заявок → заявка вручную)
+// и живая схема пути заявки. Управляет эмулятором АИС через балансировщик.
+import { api, problemText } from './api.js';
+import { $, el, input, field, toast, fmt, badge } from './dom.js';
+import { renderPresets } from './presets.js';
+import { attributeForm } from './forms.js';
+import { renderExplanation, KIND } from './explain.js';
+import { openOrder } from './overview.js';
+
+let config = null;
+let orderForm = null;
+let loadPresets = () => Promise.resolve();
+let lastRunning = null;
+
+// ---------- схема пути заявки ----------
+
+function stage(number, title, value, note, cls = '') {
+  const box = el('div', null, `stage ${cls}`);
+  box.append(el('span', number, 'stage-no'), el('div', title, 'stage-title'), el('div', value, 'stage-value'), el('div', note, 'stage-note'));
+  return box;
+}
+
+function renderFlow(status, summary) {
+  const sim = status?.simulation;
+  const t = summary.totals;
+  const flow = $('demo-flow');
+  const arrow = () => el('div', '→', 'stage-arrow');
+  flow.replaceChildren(
+    stage('1', 'Клиенты создают заявки в АИС', fmt(sim?.created ?? t.orders),
+      sim?.running ? `поток ${fmt(sim.ratePerHour)} в час` : 'поток остановлен', sim?.running ? 'live' : ''),
+    arrow(),
+    stage('2', 'Балансировщик выбирает исполнителя', fmt(t.assignedToday),
+      t.pending > 0 ? `ждут подходящего: ${fmt(t.pending)}` : 'назначено сегодня, никто не ждёт', t.pending > 0 ? 'warn' : ''),
+    arrow(),
+    stage('3', 'Назначение возвращается в АИС', t.undelivered > 0 ? `в пути ${fmt(t.undelivered)}` : 'всё доставлено',
+      'АИС записывает его через 2–10 с'),
+    arrow(),
+    stage('4', 'Исполнители работают', fmt(t.open), 'заявок сейчас в работе'),
+    arrow(),
+    stage('5', 'Заявки решены', fmt(t.closedToday), 'решено и отклонено сегодня'),
+  );
+}
+
+function renderFeed(feed) {
+  const list = $('demo-feed');
+  if (!feed.length) {
+    list.replaceChildren(el('p', 'Назначений пока нет — запустите поток заявок или создайте заявку вручную.', 'muted'));
+    return;
+  }
+  list.replaceChildren(...feed.slice(0, 12).map((a) => {
+    const item = el('button', null, 'feed-item');
+    item.type = 'button';
+    item.title = 'Почему этот исполнитель?';
+    item.append(el('span', `#${a.orderId}`, 'feed-id'), el('span', a.summary || '—', 'feed-what'),
+      el('span', '→', 'muted'), el('strong', a.executorName), badge(KIND[a.kind] || a.kind, a.kind === 'Primary' ? '' : 'warn'));
+    item.addEventListener('click', () => openOrder(a.orderId));
+    return item;
+  }));
+}
+
+function renderSimulation(sim) {
+  const running = Boolean(sim?.running);
+  $('demo-start').disabled = running;
+  $('demo-stop').disabled = !running;
+  $('demo-sim-status').textContent = running
+    ? `Идёт: создано ${fmt(sim.created)}, решено ${fmt(sim.accepted)}, отклонено ${fmt(sim.rejected)}, на доработке было ${fmt(sim.sentToRework)}`
+    : 'Поток остановлен.';
+  if (lastRunning !== running) $('demo-flow').classList.toggle('running', running);
+  lastRunning = running;
+}
+
+export async function refreshDemo() {
+  const [status, summary, feed] = await Promise.all([
+    api('/api/admin/demo/status').catch(() => null),
+    api('/api/dashboard/summary'),
+    api('/api/dashboard/feed'),
+  ]);
+  $('demo-ais-error').textContent = status ? '' : 'Эмулятор АИС недоступен — проверьте, что он запущен.';
+  renderFlow(status, summary);
+  renderSimulation(status?.simulation);
+  renderFeed(feed);
+  $('demo-executors-count').textContent = summary.totals.activeExecutors
+    ? `Сейчас активных исполнителей: ${summary.totals.activeExecutors}.` : 'Исполнителей пока нет.';
+  if (!config) {
+    await reloadConfig();
+    await loadPresets();
+  }
+}
+
+// ---------- шаги ----------
+
+async function reloadConfig() {
+  config = await api('/api/admin/config');
+  orderForm = attributeForm(config, 'Order');
+  $('demo-order-fields').replaceChildren(...orderForm.nodes);
+}
+
+function rateText(rate) {
+  const perSecond = rate / 3600;
+  const pace = perSecond >= 1 ? `≈ ${fmt(Math.round(perSecond * 10) / 10)} в секунду` : `≈ 1 заявка раз в ${fmt(Math.round(1 / perSecond))} с`;
+  return `${fmt(rate)} заявок в час (${pace})${rate === 4000 ? ' — как в кейсе' : ''}`;
+}
+
+async function sendOrder() {
+  const result = $('demo-order-result');
+  const send = $('demo-order-send');
+  try {
+    send.disabled = true;
+    const order = await api('/api/admin/demo/orders', { method: 'POST', body: { attributes: orderForm.read() } });
+    result.replaceChildren(el('p', `Заявка #${order.id} создана в АИС и отправлена в балансировщик…`, 'muted'));
+    // АИС пересылает заявку асинхронно — ждём решения до пары секунд
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      const details = await api(`/api/dashboard/orders/${order.id}`).catch(() => null);
+      const current = details?.history?.find((h) => h.isCurrent);
+      if (current?.explanation) {
+        result.replaceChildren(el('h3', `Заявка #${order.id}`), renderExplanation(current.explanation));
+        return;
+      }
+      if (details?.pendingReason && i > 3) {
+        result.replaceChildren(el('p', `Заявка #${order.id} ждёт исполнителя: ${details.pendingReason}.`, 'note'));
+        return;
+      }
+    }
+    result.replaceChildren(el('p', `Заявка #${order.id} ещё в пути — посмотрите её на вкладке «Обзор».`, 'muted'));
+  } catch (e) {
+    result.replaceChildren(el('p', e instanceof Error && !('status' in e) ? e.message : problemText(e), 'error'));
+  } finally {
+    send.disabled = false;
+  }
+}
+
+export function initDemo(onConfigChanged) {
+  const presetsBox = $('demo-presets');
+  loadPresets = () => renderPresets(presetsBox, async () => {
+    await reloadConfig();
+    onConfigChanged?.();
+  }).catch((e) => { presetsBox.textContent = problemText(e); });
+
+  const count = input('number', '15', { min: '1', max: '50', step: '1' });
+  $('demo-seed-count').replaceChildren(field('Сколько исполнителей', count));
+  $('demo-seed').addEventListener('click', async () => {
+    try {
+      const created = await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: Number(count.value) || 15 } });
+      toast(`В АИС заведено исполнителей: ${created.length}. Навыки и лимиты — случайные в рамках шаблона.`);
+      await refreshDemo();
+    } catch (e) { toast(problemText(e), 'bad'); }
+  });
+
+  const rate = $('demo-rate');
+  const label = () => { $('demo-rate-label').textContent = rateText(Number(rate.value)); };
+  rate.addEventListener('input', label);
+  label();
+  $('demo-start').addEventListener('click', async () => {
+    try {
+      await api('/api/admin/demo/simulation/start', { method: 'POST', body: { ratePerHour: Number(rate.value) } });
+      toast('Поток заявок запущен');
+      await refreshDemo();
+    } catch (e) { toast(problemText(e), 'bad'); }
+  });
+  $('demo-stop').addEventListener('click', async () => {
+    try {
+      await api('/api/admin/demo/simulation/stop', { method: 'POST' });
+      toast('Поток остановлен');
+      await refreshDemo();
+    } catch (e) { toast(problemText(e), 'bad'); }
+  });
+
+  $('demo-order-sample').addEventListener('click', () => orderForm?.sample());
+  $('demo-order-form').addEventListener('submit', (event) => { event.preventDefault(); sendOrder(); });
+}
+
+/** После смены правил в конструкторе форма ручной заявки строится заново. */
+export function invalidateDemoConfig() { config = null; }

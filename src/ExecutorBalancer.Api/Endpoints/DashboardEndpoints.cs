@@ -3,6 +3,7 @@ using System.Text;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
+using ExecutorBalancer.Application.Rules;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -132,6 +133,12 @@ public static class DashboardEndpoints
                     // нагрузка на единицу квалификации — именно её выравнивает алгоритм
                     RelativeLoad = Math.Round(openWeight / e.QualificationWeight, 3),
                     DeviationPercent = deviations.GetValueOrDefault(e.Id),
+                    // что умеет исполнитель: параметры из справочника с человеческими названиями
+                    Skills = snapshot.Catalog.All
+                        .Where(f => f.Owner == FieldOwner.Executor && e.Values.ContainsKey(f.Key))
+                        .OrderBy(f => f.Id)
+                        .Select(f => new { f.Key, f.Label, Value = Display(e.Values[f.Key]) })
+                        .ToList(),
                 };
             })
             .ToList();
@@ -168,6 +175,11 @@ public static class DashboardEndpoints
         var rows = await query.OrderByDescending(a => a.Id).Take(50)
             .Select(a => new { a.Id, a.OrderId, a.ExecutorId, a.Kind, a.Score, a.OrderWeight, a.CreatedAt })
             .ToListAsync(ct);
+        var orderIds = rows.Select(r => r.OrderId).Distinct().ToList();
+        var attributes = await db.Orders.AsNoTracking()
+            .Where(o => orderIds.Contains(o.Id))
+            .Select(o => new { o.Id, o.AttributesJson })
+            .ToDictionaryAsync(o => o.Id, o => o.AttributesJson, ct);
 
         return Results.Ok(rows.Select(a => new
         {
@@ -179,7 +191,30 @@ public static class DashboardEndpoints
             a.Score,
             a.OrderWeight,
             a.CreatedAt,
+            Summary = OrderSummary(snapshot, attributes.GetValueOrDefault(a.OrderId)),
         }));
+    }
+
+    private static string Display(FieldValue value) => value.IsArray
+        ? string.Join(", ", value.Items)
+        : value.Type == FieldType.Number
+            ? value.Number.ToString("#,0.##", CultureInfo.GetCultureInfo("ru-RU"))
+            : value.Type == FieldType.Boolean ? (value.Flag ? "да" : "нет") : value.Text;
+
+    /// <summary>Коротко, что за заявка: первые три параметра из справочника в порядке их заведения.</summary>
+    private static string OrderSummary(BalancerSnapshot snapshot, string? json)
+    {
+        if (json is null)
+        {
+            return "";
+        }
+
+        var values = snapshot.Catalog.ParseStored(FieldOwner.Order, json);
+        return string.Join(" · ", snapshot.Catalog.All
+            .Where(f => f.Owner == FieldOwner.Order && values.ContainsKey(f.Key))
+            .OrderBy(f => f.Id)
+            .Take(3)
+            .Select(f => Display(values[f.Key])));
     }
 
     private static async Task<IResult> OrderDetails(long id, IBalancerDbContext db, CancellationToken ct)

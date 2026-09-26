@@ -25,7 +25,9 @@
         <span class="muted">распределение заявок в реальном времени</span>
       </div>
       <nav class="tabs" id="tabs">
+        <button data-tab="demo" class="tab hidden" id="tab-button-demo">Демонстрация</button>
         <button data-tab="overview" class="tab">Обзор</button>
+        <button data-tab="executors" class="tab">Исполнители</button>
         <button data-tab="analytics" class="tab">Аналитика</button>
         <button data-tab="constructor" class="tab">Конструктор</button>
         <button data-tab="preview" class="tab">Проверка заявки</button>
@@ -37,8 +39,98 @@
       </div>
     </header>
 
+    <!-- Демонстрация -->
+    <section id="tab-demo" class="tab-page hidden">
+      <div class="card intro">
+        <h2>Как это работает</h2>
+        <p>Клиенты оставляют обращения во внешней системе компании — АИС (CRM, учётная система банка, склада, магазина).
+          АИС сразу передаёт каждое обращение сюда, и сервис за доли секунды решает, какому сотруднику его отдать:
+          только тем, кто сейчас работает и подходит по правилам из конструктора, а из них — тому, у кого меньше нагрузка
+          с учётом опыта. Решение уходит обратно в АИС.</p>
+        <p class="muted">Настоящей АИС на демонстрации нет — её изображает эмулятор. Пульт ниже управляет им: выбирает сферу,
+          заводит сотрудников, запускает поток обращений и имитирует работу сотрудников (решено, отказ, на доработку).</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Путь заявки — прямо сейчас</h2>
+          <span id="demo-ais-error" class="error"></span>
+        </div>
+        <div id="demo-flow" class="flow"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2><span class="step-no">1</span> Сфера деятельности</h2></div>
+        <p class="hint">Сервис не привязан к банку: параметры и правила — это настройки, а не код. Шаблон заменяет параметры,
+          правила и веса на набор для другой отрасли; поток заявок и сотрудники подстроятся под него.</p>
+        <div id="demo-presets" class="presets"></div>
+      </div>
+
+      <section class="grid grid-even">
+        <div class="card">
+          <div class="card-head"><h2><span class="step-no">2</span> Сотрудники</h2></div>
+          <p class="hint">Заводит сотрудников в АИС со случайными навыками, опытом и дневными лимитами в рамках выбранной сферы.
+            АИС передаёт их балансировщику. Прежние сотрудники сверх нового числа уходят в неактивные.</p>
+          <div id="demo-seed-count"></div>
+          <div class="row-actions">
+            <button id="demo-seed" type="button">Завести сотрудников</button>
+            <a class="button ghost" href="#executors">Посмотреть →</a>
+          </div>
+          <p id="demo-executors-count" class="muted"></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2><span class="step-no">3</span> Поток обращений</h2></div>
+          <p class="hint">Эмулятор создаёт обращения с заданной скоростью, а сотрудники в нём «работают»: каждую секунду
+            часть назначенных заявок решается, отклоняется или уходит на доработку и потом возвращается.</p>
+          <input id="demo-rate" type="range" min="500" max="40000" step="500" value="4000" aria-label="Скорость потока">
+          <p id="demo-rate-label" class="rate"></p>
+          <div class="row-actions">
+            <button id="demo-start" type="button">Запустить</button>
+            <button id="demo-stop" type="button" class="ghost">Остановить</button>
+          </div>
+          <p id="demo-sim-status" class="muted"></p>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <div class="card-head">
+            <h2><span class="step-no">4</span> Одно обращение вручную</h2>
+            <button id="demo-order-sample" class="ghost" type="button">Заполнить примером</button>
+          </div>
+          <p class="hint">Как будто клиент оставил обращение: оно создаётся в АИС и проходит весь путь. Ниже появится,
+            кому оно ушло и почему остальные не подошли.</p>
+          <form id="demo-order-form" class="form">
+            <div id="demo-order-fields" class="form"></div>
+            <button id="demo-order-send" type="submit">Отправить в АИС</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Кому ушло</h2></div>
+          <div id="demo-order-result"><p class="muted">Здесь появится решение по вашему обращению.</p></div>
+        </div>
+      </section>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Последние назначения</h2>
+          <span class="muted">щёлкните — покажет, почему выбран этот сотрудник</span>
+        </div>
+        <div id="demo-feed" class="feed"></div>
+      </div>
+    </section>
+
+    <!-- Исполнители -->
+    <section id="tab-executors" class="tab-page hidden">
+      <p class="hint">Сотрудники, которых передала АИС: что умеют (параметры из конструктора), насколько загружены и сколько
+        получили сегодня. Заявка достаётся только тому, кто на работе и подходит по всем правилам.</p>
+      <div id="executors-list" class="executors-grid"></div>
+    </section>
+
     <!-- Обзор -->
-    <section id="tab-overview" class="tab-page">
+    <section id="tab-overview" class="tab-page hidden">
+      <p class="hint">Мониторинг в реальном времени: сколько заявок, как загружены сотрудники и кому уходят новые заявки.
+        Обновляется каждые 2 секунды.</p>
       <section class="tiles" id="tiles"></section>
       <p id="rule-errors" class="error"></p>
       <div class="card">
@@ -131,8 +223,20 @@
 
     <!-- Конструктор -->
     <section id="tab-constructor" class="tab-page hidden">
-      <p class="hint">Изменения применяются сразу, без перезапуска: следующая заявка распределяется уже по новым правилам.
-        Каждое изменение проверяется по типам параметров и записывается в журнал.</p>
+      <div class="card intro">
+        <h2>Как устроен конструктор</h2>
+        <p><strong>Параметр</strong> — характеристика заявки (например, «Тематика», «Сумма») или сотрудника («Тематики»,
+          «Максимальная сумма»). АИС передаёт значения под этими ключами. <strong>Правило</strong> связывает их:
+          «Тематика заявки — одно из — Тематики сотрудника». Сотрудник получает заявку, только если выполнены все правила.
+          <strong>Вес заявки</strong> — насколько она сложная: сложные нагружают сильнее.</p>
+        <p class="muted">Изменения применяются сразу, без перезапуска и программиста: следующая заявка распределяется уже
+          по новым правилам. Каждое изменение проверяется и записывается в журнал.</p>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Шаблоны сфер</h2></div>
+        <p class="hint">Готовые наборы параметров и правил для разных отраслей — можно взять за основу и дополнить своими.</p>
+        <div id="constructor-presets" class="presets"></div>
+      </div>
       <section class="stack">
         <div class="card">
           <div class="card-head">
