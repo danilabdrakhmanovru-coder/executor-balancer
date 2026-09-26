@@ -83,14 +83,16 @@ public sealed class ConfigurationService(
     /// <summary>Шаблоны и признак «сейчас применён»: все параметры шаблона есть в справочнике.</summary>
     public async Task<IReadOnlyList<PresetView>> GetPresetsAsync(CancellationToken cancellationToken)
     {
-        var keys = (await db.FieldDefinitions.AsNoTracking().Select(f => new { f.Owner, f.Key }).ToListAsync(cancellationToken))
-            .Select(f => (f.Owner, f.Key))
-            .ToHashSet();
+        // «применён» — все параметры шаблона есть с тем же типом и справочником
+        var current = (await db.FieldDefinitions.AsNoTracking().ToListAsync(cancellationToken))
+            .ToDictionary(f => (f.Owner, f.Key));
+        bool Same(PresetField f) => current.TryGetValue((f.Owner, f.Key), out var existing)
+                                    && existing.Type == f.Type && existing.Options.SequenceEqual(f.Options);
         return DomainPresets.All
             .Select(p => new PresetView(p.Id, p.Title, p.Description,
                 p.Fields.Where(f => f.Owner == FieldOwner.Order).Select(f => f.Label).ToArray(),
                 p.Fields.Where(f => f.Owner == FieldOwner.Executor).Select(f => f.Label).ToArray(),
-                p.Fields.All(f => keys.Contains((f.Owner, f.Key)))))
+                p.Fields.All(Same)))
             .ToList();
     }
 
@@ -104,9 +106,11 @@ public sealed class ConfigurationService(
         var preset = DomainPresets.Find(id)
                      ?? throw new InvalidInputException(new Dictionary<string, string[]> { ["preset"] = ["неизвестный шаблон"] });
 
+        var previous = (await GetPresetsAsync(cancellationToken)).FirstOrDefault(p => p.IsCurrent);
         var before = new
         {
-            Fields = await db.FieldDefinitions.AsNoTracking().OrderBy(f => f.Id).Select(f => f.Key).ToListAsync(cancellationToken),
+            Preset = previous?.Title,
+            Fields = await db.FieldDefinitions.AsNoTracking().OrderBy(f => f.Id).Select(f => f.Label).ToListAsync(cancellationToken),
             Rules = await db.Rules.AsNoTracking().OrderBy(r => r.Id).Select(r => r.Name).ToListAsync(cancellationToken),
         };
         var (fields, rules, weightRules) = DomainPresets.Build(preset, clock.GetUtcNow());
@@ -130,7 +134,7 @@ public sealed class ConfigurationService(
                 DataJson = JsonSerializer.Serialize(new
                 {
                     before,
-                    after = new { Preset = preset.Title, Fields = fields.Select(f => f.Key), Rules = rules.Select(r => r.Name) },
+                    after = new { Preset = preset.Title, Fields = fields.Select(f => f.Label), Rules = rules.Select(r => r.Name) },
                 }, AuditJson),
                 CreatedAt = clock.GetUtcNow(),
             });
@@ -637,7 +641,9 @@ public sealed class ConfigurationService(
             ? rules.Count(r => r.OrderField == field.Key) + weightRules.Count(r => r.OrderField == field.Key)
             : rules.Count(r => r.Target == RuleTarget.ExecutorField
                                && (r.ExecutorField == field.Key || r.ExecutorFieldUpper == field.Key));
-        return new FieldView(field.Id, field.Owner, field.Key, field.Label, field.Type, field.Options, used);
+        var hint = DomainPresets.Hint(field.Owner, field.Key);
+        return new FieldView(field.Id, field.Owner, field.Key, field.Label, field.Type, field.Options, used,
+            hint?.Min ?? hint?.Choices?.Min(), hint?.Max ?? hint?.Choices?.Max());
     }
 
     private static RuleView ToView(Rule rule, FieldCatalog catalog) => new(

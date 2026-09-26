@@ -1,53 +1,129 @@
-// Журнал: изменения конфигурации и входы администратора.
+// Журнал: изменения конфигурации и входы администратора — обычными словами, без внутренних ключей.
 import { api } from './api.js';
-import { $, el, row, fmtDateTime, emptyRow } from './dom.js';
+import { $, el, row, badge, fmtDateTime, emptyRow } from './dom.js';
 
 const ACTION = {
-  login: 'вход', login_failed: 'неудачный вход',
-  field_created: 'параметр добавлен', field_updated: 'параметр изменён', field_deleted: 'параметр удалён',
-  rule_created: 'правило добавлено', rule_updated: 'правило изменено', rule_deleted: 'правило удалено',
-  weight_rule_created: 'правило веса добавлено', weight_rule_updated: 'правило веса изменено',
-  weight_rule_deleted: 'правило веса удалено',
+  login: ['Вход', 'ok'], login_failed: ['Неверный пароль', 'bad'], preset_applied: ['Смена сферы', 'warn'],
+  field_created: ['Новый параметр', ''], field_updated: ['Параметр изменён', ''], field_deleted: ['Параметр удалён', 'bad'],
+  rule_created: ['Новое правило', ''], rule_updated: ['Правило изменено', ''], rule_deleted: ['Правило удалено', 'bad'],
+  weight_rule_created: ['Новое правило веса', ''], weight_rule_updated: ['Правило веса изменено', ''],
+  weight_rule_deleted: ['Правило веса удалено', 'bad'],
 };
-const ENTITY = { session: 'сессия', field: 'параметр', rule: 'правило', weight_rule: 'правило веса' };
+const TYPE = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
+const OWNER = { Order: 'заявки', Executor: 'сотрудника' };
 const PAGE = 50;
 
 let oldest = null;
+let config = null;
 
-function short(value) {
-  const text = Array.isArray(value) ? `[${value.join(', ')}]` : typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
-  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+const quote = (text) => `«${text}»`;
+
+/** Значение для человека: да/нет вместо true/false, списки через запятую. */
+function plain(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  if (value === true) return 'да';
+  if (value === false) return 'нет';
+  if (Array.isArray(value)) return value.map(plain).join(', ');
+  if (typeof value === 'object') return Object.values(value).map(plain).join(', ');
+  return String(value);
 }
 
-/** Что изменилось: для правки — только отличающиеся поля, для создания и удаления — главное. */
-function details(entry) {
-  const before = entry.data?.before;
-  const after = entry.data?.after;
-  if (entry.entity === 'session') return `адрес ${entry.entityId}`;
-  if (before && after) {
-    const changes = Object.keys(after)
-      .filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]))
-      .map((k) => `${k}: ${short(before[k])} → ${short(after[k])}`);
-    return changes.length ? changes.join('; ') : 'без изменений';
+function fieldLabel(owner, key) {
+  const field = config?.fields.find((f) => f.owner === owner && f.key === key);
+  return field ? field.label : key;
+}
+
+function operatorLabel(op) {
+  return config?.operators.find((o) => o.value === op)?.label ?? op;
+}
+
+/** Условие правила словами: «Тематика — одно из — Тематики сотрудника». */
+function condition(rule) {
+  const left = fieldLabel('Order', rule.orderField);
+  const op = operatorLabel(rule.operator);
+  if (rule.target === 'ExecutorField') {
+    const right = rule.operator === 'between'
+      ? `от «${fieldLabel('Executor', rule.executorField)}» до «${fieldLabel('Executor', rule.executorFieldUpper)}» сотрудника`
+      : `${quote(fieldLabel('Executor', rule.executorField))} сотрудника`;
+    return `${left} ${op} ${right}`;
   }
-  const state = after || before || {};
-  return ['name', 'key', 'label', 'orderField', 'operator', 'value', 'weight']
-    .filter((k) => state[k] !== undefined && state[k] !== null)
-    .map((k) => `${k}: ${short(state[k])}`).join('; ');
+  const value = rule.operator === 'between' && Array.isArray(rule.value)
+    ? `от ${plain(rule.value[0])} до ${plain(rule.value[1])}` : plain(rule.value);
+  return `${left} ${op} ${value}`;
+}
+
+const weightText = (r) => `если ${condition({ ...r, target: 'Constant' })} — вес ${plain(r.weight)}`;
+
+/** Что поменялось в правке: только изменённые свойства, с понятными названиями. */
+function changes(before, after, describe) {
+  const parts = [];
+  for (const [key, label, show] of describe) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) parts.push(`${label}: ${show(before)} → ${show(after)}`);
+  }
+  return parts.length ? parts.join('; ') : 'без изменений';
+}
+
+const RULE_PROPS = [
+  ['name', 'название', (r) => quote(r.name)],
+  ['isEnabled', 'включено', (r) => plain(r.isEnabled)],
+  ['priority', 'приоритет', (r) => plain(r.priority)],
+  ['isStrict', 'строгое', (r) => plain(r.isStrict)],
+];
+const RULE_CONDITION = ['orderField', 'operator', 'target', 'executorField', 'executorFieldUpper', 'value'];
+
+function describe(entry) {
+  const before = entry.data?.before ?? {};
+  const after = entry.data?.after ?? {};
+  const address = String(entry.entityId || '').replace(/^::ffff:/, '');
+  switch (entry.action) {
+    case 'login': return `Вход в панель администратора · адрес ${address}`;
+    case 'login_failed': return `Попытка входа с неверным паролем · адрес ${address}`;
+    case 'preset_applied': {
+      const was = before.preset ? ` Было: ${quote(before.preset)}.`
+        : Array.isArray(before.fields) ? ` Было: своя настройка — параметров ${before.fields.length}, правил ${(before.rules || []).length}.` : '';
+      return `Применён шаблон ${quote(after.preset)}: параметров ${(after.fields || []).length}, правил ${(after.rules || []).length}.${was}`;
+    }
+    case 'field_created':
+      return `Добавлен параметр ${OWNER[after.owner] || ''} ${quote(after.label)} — ${TYPE[after.type] || after.type}`
+        + `${after.options?.length ? `: ${after.options.join(', ')}` : ''}`;
+    case 'field_updated':
+      return `Параметр ${quote(after.label)}: ${changes(before, after, [
+        ['label', 'название', (f) => quote(f.label)],
+        ['options', 'справочник', (f) => plain(f.options)],
+      ])}`;
+    case 'field_deleted': return `Удалён параметр ${OWNER[before.owner] || ''} ${quote(before.label)}`;
+    case 'rule_created': return `Добавлено правило ${quote(after.name)}: ${condition(after)}`;
+    case 'rule_deleted': return `Удалено правило ${quote(before.name)}: ${condition(before)}`;
+    case 'rule_updated': {
+      const conditionChanged = RULE_CONDITION.some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+      const text = changes(before, after, RULE_PROPS);
+      const parts = [text === 'без изменений' && conditionChanged ? '' : text,
+        conditionChanged ? `условие: ${condition(before)} → ${condition(after)}` : ''].filter(Boolean);
+      return `Правило ${quote(after.name)}: ${parts.join('; ')}`;
+    }
+    case 'weight_rule_created': return `Добавлено правило веса: ${weightText(after)}`;
+    case 'weight_rule_deleted': return `Удалено правило веса: ${weightText(before)}`;
+    case 'weight_rule_updated':
+      return `Правило веса: ${weightText(before)} → ${weightText(after)}`
+        + `${before.isEnabled !== after.isEnabled ? ` (включено: ${plain(before.isEnabled)} → ${plain(after.isEnabled)})` : ''}`;
+    default: return plain(entry.data);
+  }
 }
 
 async function load(append) {
   const query = new URLSearchParams({ limit: String(PAGE) });
   if (append && oldest) query.set('before', String(oldest));
-  const entries = await api(`/api/admin/audit?${query}`);
-  const rows = entries.map((e) => row([
-    fmtDateTime(e.createdAt), ACTION[e.action] || e.action,
-    `${ENTITY[e.entity] || e.entity}${e.entity === 'session' ? '' : ` #${e.entityId}`}`, el('span', details(e), 'wrap-text'),
-  ], e.action === 'login_failed' ? 'warn-row' : ''));
+  const [entries, cfg] = await Promise.all([api(`/api/admin/audit?${query}`), config && append ? config : api('/api/admin/config')]);
+  config = cfg;
+  const rows = entries.map((e) => {
+    const [label, cls] = ACTION[e.action] || [e.action, ''];
+    return row([fmtDateTime(e.createdAt), badge(label, cls), el('span', describe(e), 'wrap-text')],
+      e.action === 'login_failed' ? 'warn-row' : '');
+  });
   if (append) $('audit').append(...rows);
-  else $('audit').replaceChildren(...(rows.length ? rows : [emptyRow(4, 'Записей нет')]));
+  else $('audit').replaceChildren(...(rows.length ? rows : [emptyRow(3, 'Записей нет')]));
   if (entries.length) oldest = entries[entries.length - 1].id;
-  $('audit-more').classList.toggle('hidden', entries.length < PAGE);
+  $('audit-more-wrap').classList.toggle('hidden', entries.length < PAGE);
 }
 
 export const refreshAudit = () => load(false);

@@ -102,13 +102,13 @@ KEY=ваш_ключ; URL=http://127.0.0.1:8080/api/integration
 curl -X PUT $URL/executors/1 -H "X-Api-Key: $KEY" -H "Content-Type: application/json" -d '{
   "fullName": "Иванов И. И.", "isActive": true, "dailyLimit": 40, "qualificationWeight": 1.5,
   "attributes": {"min_sum": 0, "max_sum": 5000000, "order_types": ["ORDER_1","ORDER_2"],
-    "subjects": ["credit","cards"], "segments": ["small","medium"], "client_classes": ["standard","vip"]}}'
+    "subjects": ["кредит","карты"], "segments": ["малый","средний"], "client_classes": ["обычный","VIP"]}}'
 
 # заявка
 curl -X POST $URL/orders -H "X-Api-Key: $KEY" -H "Content-Type: application/json" -d '{
   "id": 1001, "parentId": null,
-  "attributes": {"sum": 250000, "order_type": "ORDER_1", "subject": "credit",
-    "client_segment": "small", "client_class": "standard"}}'
+  "attributes": {"sum": 250000, "order_type": "ORDER_1", "subject": "кредит",
+    "client_segment": "малый", "client_class": "обычный"}}'
 
 # почему назначен именно этот исполнитель
 curl $URL/orders/1001/assignment -H "X-Api-Key: $KEY"

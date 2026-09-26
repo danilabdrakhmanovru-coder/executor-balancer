@@ -31,8 +31,9 @@ public sealed record WeightRuleInput(
     JsonElement? Value,
     decimal Weight);
 
+/// <param name="SampleMin">Правдоподобный диапазон числа для «Заполнить примером» (из шаблона сферы).</param>
 public sealed record FieldView(int Id, FieldOwner Owner, string Key, string Label, FieldType Type, string[] Options,
-    int UsedByRules);
+    int UsedByRules, decimal? SampleMin = null, decimal? SampleMax = null);
 
 public sealed record RuleView(
     int Id,

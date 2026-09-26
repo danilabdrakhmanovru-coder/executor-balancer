@@ -40,6 +40,16 @@ function read(f, c) {
   return raw;
 }
 
+/** Число для примера: в диапазоне из шаблона сферы, больше мелких значений, чем крупных. */
+function sampleNumber(f) {
+  const min = f.sampleMin ?? 1;
+  const max = f.sampleMax ?? 100;
+  const value = min > 0 && max / min > 50
+    ? Math.exp(Math.log(min) + Math.random() * (Math.log(max) - Math.log(min)))
+    : min + Math.random() * (max - min);
+  return Math.round(value);
+}
+
 /**
  * Поля формы для параметров одного владельца (Order или Executor).
  * read() возвращает объект «ключ → значение» без незаполненных полей.
@@ -65,7 +75,7 @@ export function attributeForm(config, owner, values = {}) {
         } else if (f.type === 'Enum' && f.options.length) {
           c.node.value = f.options[Math.floor(Math.random() * f.options.length)];
         } else if (f.type === 'Number') {
-          c.node.value = String(Math.round(1 + Math.random() * 99) * 1000);
+          c.node.value = String(sampleNumber(f));
         } else if (f.type === 'Boolean') {
           c.node.value = Math.random() < 0.5 ? 'true' : 'false';
         }

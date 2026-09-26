@@ -234,7 +234,7 @@
                   </div>
                   <div class="table-responsive scroll">
                     <table class="table card-table table-vcenter table-hover">
-                      <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th>Score</th></tr></thead>
+                      <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th title="Нагрузка сотрудника после назначения на единицу квалификации — выбирается наименьшая">Оценка</th></tr></thead>
                       <tbody id="feed"></tbody>
                     </table>
                   </div>
@@ -408,11 +408,11 @@
                 <div class="card-actions"><button id="audit-refresh" class="btn btn-sm" type="button"><svg class="icon"><use href="icons.svg#refresh"></use></svg>Обновить</button></div>
               </div>
               <div class="table-responsive scroll tall"><table class="table card-table table-vcenter">
-                <thead><tr><th>Время</th><th>Событие</th><th>Объект</th><th>Подробности</th></tr></thead>
+                <thead><tr><th>Время</th><th>Событие</th><th>Что произошло</th></tr></thead>
                 <tbody id="audit"></tbody>
               </table></div>
-              <div class="card-footer">
-                <button id="audit-more" class="btn w-100 hidden" type="button">Показать ещё</button>
+              <div class="card-footer hidden" id="audit-more-wrap">
+                <button id="audit-more" class="btn w-100" type="button">Показать ещё</button>
               </div>
             </div>
           </section>

@@ -45,9 +45,9 @@ public static class DomainPresets
     public const string DefaultId = "bank";
 
     private static readonly string[] OrderTypes = ["ORDER_1", "ORDER_2", "ORDER_3"];
-    private static readonly string[] Subjects = ["credit", "deposit", "cards", "mortgage", "insurance"];
-    private static readonly string[] Segments = ["micro", "small", "medium", "large"];
-    private static readonly string[] ClientClasses = ["standard", "vip"];
+    private static readonly string[] Subjects = ["кредит", "вклад", "карты", "ипотека", "страхование"];
+    private static readonly string[] Segments = ["микро", "малый", "средний", "крупный"];
+    private static readonly string[] ClientClasses = ["обычный", "VIP"];
 
     public static readonly DomainPreset Bank = new(
         "bank",
@@ -65,7 +65,7 @@ public static class DomainPresets
             new(FieldOwner.Executor, "order_types", "Типы заявок", FieldType.Array, OrderTypes, new(MinItems: 3)),
             new(FieldOwner.Executor, "subjects", "Тематики", FieldType.Array, Subjects, new(MinItems: 2)),
             new(FieldOwner.Executor, "segments", "Сегменты клиентов", FieldType.Array, Segments, new(MinItems: 3)),
-            new(FieldOwner.Executor, "client_classes", "Категории клиентов", FieldType.Array, ClientClasses, new(Required: ["standard"])),
+            new(FieldOwner.Executor, "client_classes", "Категории клиентов", FieldType.Array, ClientClasses, new(Required: ["обычный"])),
         ],
         [
             new("Сумма в пределах полномочий", "sum", RuleOperator.Between, "min_sum", "max_sum"),
@@ -75,15 +75,15 @@ public static class DomainPresets
             new("Категория клиента", "client_class", RuleOperator.In, "client_classes"),
         ],
         [
-            new("client_class", RuleOperator.EqualTo, "vip", 3),
+            new("client_class", RuleOperator.EqualTo, "VIP", 3),
             new("sum", RuleOperator.GreaterThanOrEqual, 1_000_000, 3),
             new("sum", RuleOperator.GreaterThanOrEqual, 200_000, 2),
         ]);
 
-    private static readonly string[] Channels = ["phone", "chat", "email"];
-    private static readonly string[] Languages = ["ru", "tt", "ba", "en"];
-    private static readonly string[] Products = ["internet", "tv", "mobile", "cloud"];
-    private static readonly string[] Tariffs = ["basic", "business", "premium"];
+    private static readonly string[] Channels = ["телефон", "чат", "почта"];
+    private static readonly string[] Languages = ["русский", "татарский", "башкирский", "английский"];
+    private static readonly string[] Products = ["интернет", "ТВ", "мобильная связь", "облако"];
+    private static readonly string[] Tariffs = ["базовый", "бизнес", "премиум"];
 
     public static readonly DomainPreset Support = new(
         "support",
@@ -95,11 +95,11 @@ public static class DomainPresets
             new(FieldOwner.Order, "language", "Язык клиента", FieldType.Enum, Languages, new(Weights: [0.7, 0.15, 0.1, 0.05])),
             new(FieldOwner.Order, "product", "Продукт", FieldType.Enum, Products),
             new(FieldOwner.Order, "tariff", "Тариф", FieldType.Enum, Tariffs, new(Weights: [0.6, 0.3, 0.1])),
-            new(FieldOwner.Order, "priority", "Срочность", FieldType.Enum, ["low", "normal", "high"], new(Weights: [0.2, 0.65, 0.15])),
+            new(FieldOwner.Order, "priority", "Срочность", FieldType.Enum, ["низкая", "обычная", "высокая"], new(Weights: [0.2, 0.65, 0.15])),
             new(FieldOwner.Executor, "channels", "Каналы", FieldType.Array, Channels, new(MinItems: 2)),
-            new(FieldOwner.Executor, "languages", "Языки", FieldType.Array, Languages, new(Required: ["ru"], MaxItems: 2)),
+            new(FieldOwner.Executor, "languages", "Языки", FieldType.Array, Languages, new(Required: ["русский"], MaxItems: 2)),
             new(FieldOwner.Executor, "products", "Продукты", FieldType.Array, Products, new(MinItems: 2)),
-            new(FieldOwner.Executor, "tariffs", "Тарифы", FieldType.Array, Tariffs, new(Required: ["basic"], MinItems: 2)),
+            new(FieldOwner.Executor, "tariffs", "Тарифы", FieldType.Array, Tariffs, new(Required: ["базовый"], MinItems: 2)),
         ],
         [
             new("Канал", "channel", RuleOperator.In, "channels"),
@@ -108,13 +108,13 @@ public static class DomainPresets
             new("Тариф", "tariff", RuleOperator.In, "tariffs"),
         ],
         [
-            new("priority", RuleOperator.EqualTo, "high", 3),
-            new("tariff", RuleOperator.EqualTo, "premium", 2),
-            new("channel", RuleOperator.EqualTo, "phone", 1.5m),
+            new("priority", RuleOperator.EqualTo, "высокая", 3),
+            new("tariff", RuleOperator.EqualTo, "премиум", 2),
+            new("channel", RuleOperator.EqualTo, "телефон", 1.5m),
         ]);
 
-    private static readonly string[] Regions = ["ufa", "kazan", "samara", "perm"];
-    private static readonly string[] CargoTypes = ["standard", "fragile", "dangerous", "refrigerated"];
+    private static readonly string[] Regions = ["Уфа", "Казань", "Самара", "Пермь"];
+    private static readonly string[] CargoTypes = ["обычный", "хрупкий", "опасный", "рефрижератор"];
 
     public static readonly DomainPreset Logistics = new(
         "logistics",
@@ -125,10 +125,10 @@ public static class DomainPresets
             new(FieldOwner.Order, "region", "Регион", FieldType.Enum, Regions, new(Weights: [0.4, 0.3, 0.2, 0.1])),
             new(FieldOwner.Order, "cargo_weight", "Вес груза, кг", FieldType.Number, [], new(Min: 1, Max: 2_000, LogScale: true)),
             new(FieldOwner.Order, "cargo_type", "Тип груза", FieldType.Enum, CargoTypes, new(Weights: [0.7, 0.15, 0.05, 0.1])),
-            new(FieldOwner.Order, "urgency", "Срочность", FieldType.Enum, ["standard", "express"], new(Weights: [0.8, 0.2])),
+            new(FieldOwner.Order, "urgency", "Срочность", FieldType.Enum, ["обычная", "экспресс"], new(Weights: [0.8, 0.2])),
             new(FieldOwner.Executor, "regions", "Регионы", FieldType.Array, Regions, new(MinItems: 1, MaxItems: 3)),
             new(FieldOwner.Executor, "max_cargo_weight", "Допуск по весу, кг", FieldType.Number, [], new(Choices: [300, 1_000, 5_000])),
-            new(FieldOwner.Executor, "cargo_types", "Типы груза", FieldType.Array, CargoTypes, new(Required: ["standard"], MinItems: 2)),
+            new(FieldOwner.Executor, "cargo_types", "Типы груза", FieldType.Array, CargoTypes, new(Required: ["обычный"], MinItems: 2)),
         ],
         [
             new("Регион", "region", RuleOperator.In, "regions"),
@@ -136,14 +136,14 @@ public static class DomainPresets
             new("Тип груза", "cargo_type", RuleOperator.In, "cargo_types"),
         ],
         [
-            new("cargo_type", RuleOperator.EqualTo, "dangerous", 3),
-            new("urgency", RuleOperator.EqualTo, "express", 2),
+            new("cargo_type", RuleOperator.EqualTo, "опасный", 3),
+            new("urgency", RuleOperator.EqualTo, "экспресс", 2),
             new("cargo_weight", RuleOperator.GreaterThanOrEqual, 500, 2),
         ]);
 
-    private static readonly string[] RequestTypes = ["return", "complaint", "exchange", "question"];
-    private static readonly string[] Categories = ["electronics", "clothes", "home", "kids"];
-    private static readonly string[] Loyalty = ["new", "regular", "gold"];
+    private static readonly string[] RequestTypes = ["возврат", "претензия", "обмен", "вопрос"];
+    private static readonly string[] Categories = ["электроника", "одежда", "дом", "детские товары"];
+    private static readonly string[] Loyalty = ["новый", "постоянный", "золотой"];
 
     public static readonly DomainPreset Ecommerce = new(
         "ecommerce",
@@ -158,7 +158,7 @@ public static class DomainPresets
             new(FieldOwner.Executor, "request_types", "Типы обращений", FieldType.Array, RequestTypes, new(MinItems: 2)),
             new(FieldOwner.Executor, "categories", "Категории", FieldType.Array, Categories, new(MinItems: 2)),
             new(FieldOwner.Executor, "max_amount", "Предельная сумма", FieldType.Number, [], new(Choices: [30_000, 100_000, 500_000])),
-            new(FieldOwner.Executor, "loyalty_levels", "Уровни клиентов", FieldType.Array, Loyalty, new(Required: ["new", "regular"])),
+            new(FieldOwner.Executor, "loyalty_levels", "Уровни клиентов", FieldType.Array, Loyalty, new(Required: ["новый", "постоянный"])),
         ],
         [
             new("Тип обращения", "request_type", RuleOperator.In, "request_types"),
@@ -167,8 +167,8 @@ public static class DomainPresets
             new("Лояльность клиента", "loyalty", RuleOperator.In, "loyalty_levels"),
         ],
         [
-            new("request_type", RuleOperator.EqualTo, "complaint", 3),
-            new("loyalty", RuleOperator.EqualTo, "gold", 2),
+            new("request_type", RuleOperator.EqualTo, "претензия", 3),
+            new("loyalty", RuleOperator.EqualTo, "золотой", 2),
             new("amount", RuleOperator.GreaterThanOrEqual, 50_000, 2),
         ]);
 

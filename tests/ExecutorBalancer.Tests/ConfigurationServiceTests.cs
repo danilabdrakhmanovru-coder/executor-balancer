@@ -33,8 +33,8 @@ public class ConfigurationServiceTests : IAsyncLifetime
         Assert.Equal(1, (await _f.Receive(1)).ExecutorId);
         var preview = await _f.Run(b => b.PreviewAsync(null, BalancerFixture.Attributes(new
         {
-            sum = 50_000, order_type = "ORDER_1", subject = "credit", client_segment = "small",
-            client_class = "standard", language = "en",
+            sum = 50_000, order_type = "ORDER_1", subject = "кредит", client_segment = "малый",
+            client_class = "обычный", language = "en",
         }), CancellationToken.None));
         Assert.Equal(1, preview.ChosenExecutorId); // пока правила нет, язык не важен: у первого score 2/3 против 1
 
@@ -45,8 +45,8 @@ public class ConfigurationServiceTests : IAsyncLifetime
         // по score снова выиграл бы первый, но заявка на английском, а он говорит только по-русски
         var result = await _f.Receive(2, attributes: new
         {
-            sum = 50_000, order_type = "ORDER_1", subject = "credit", client_segment = "small",
-            client_class = "standard", language = "en",
+            sum = 50_000, order_type = "ORDER_1", subject = "кредит", client_segment = "малый",
+            client_class = "обычный", language = "en",
         });
         Assert.Equal(2, result.ExecutorId);
     }
@@ -137,9 +137,9 @@ public class ConfigurationServiceTests : IAsyncLifetime
     {
         await _f.AddExecutor(1);
         await _f.Config(c => c.CreateWeightRuleAsync(new WeightRuleInput(true, 1, "subject", RuleOperator.EqualTo,
-            BalancerFixture.Json("mortgage"), 5m), CancellationToken.None));
+            BalancerFixture.Json("ипотека"), 5m), CancellationToken.None));
 
-        await _f.Receive(1, attributes: BalancerFixture.DefaultOrder(subject: "mortgage"));
+        await _f.Receive(1, attributes: BalancerFixture.DefaultOrder(subject: "ипотека"));
 
         var weight = await _f.Query(db => db.Orders.Where(o => o.Id == 1).Select(o => o.Weight).FirstAsync());
         Assert.Equal(5m, weight);
@@ -169,7 +169,7 @@ public class ConfigurationServiceTests : IAsyncLifetime
 
         Assert.Contains(view.Rules, r => r.Text == "Сумма заявки в диапазоне [Минимальная сумма; Максимальная сумма] исполнителя");
         Assert.All(view.Rules, r => Assert.Null(r.Error));
-        Assert.Contains(view.WeightRules, r => r.Text == "Категория клиента равно vip");
+        Assert.Contains(view.WeightRules, r => r.Text == "Категория клиента равно VIP");
         Assert.Equal(3, view.Fields.Single(f => f.Key == "sum").UsedByRules);
     }
 }

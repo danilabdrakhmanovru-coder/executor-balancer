@@ -27,10 +27,10 @@ public class OrderBalancerTests : IAsyncLifetime
     [Fact]
     public async Task ExecutorMustMatchAllParameters()
     {
-        await _f.AddExecutor(1, subjects: ["deposit"]);
-        await _f.AddExecutor(2, subjects: ["credit"]);
+        await _f.AddExecutor(1, subjects: ["вклад"]);
+        await _f.AddExecutor(2, subjects: ["кредит"]);
 
-        var result = await _f.Receive(10, attributes: BalancerFixture.DefaultOrder(subject: "credit"));
+        var result = await _f.Receive(10, attributes: BalancerFixture.DefaultOrder(subject: "кредит"));
 
         Assert.Equal(2, result.ExecutorId);
         var explanation = await Explanation(10);
@@ -84,7 +84,7 @@ public class OrderBalancerTests : IAsyncLifetime
         await _f.AddExecutor(1);
         await _f.Receive(1);
         await _f.AddExecutor(2);
-        await _f.AddExecutor(1, subjects: ["deposit"]);
+        await _f.AddExecutor(1, subjects: ["вклад"]);
 
         var child = await _f.Receive(2, parentId: 1);
 
@@ -186,7 +186,7 @@ public class OrderBalancerTests : IAsyncLifetime
     [Fact]
     public async Task OrderWithoutSuitableExecutorStaysPending()
     {
-        await _f.AddExecutor(1, subjects: ["deposit"]);
+        await _f.AddExecutor(1, subjects: ["вклад"]);
 
         var result = await _f.Receive(1);
 
@@ -244,7 +244,7 @@ public class OrderBalancerTests : IAsyncLifetime
     [Fact]
     public async Task PendingOrderIsAssignedWhenExecutorAppears()
     {
-        await _f.AddExecutor(1, subjects: ["deposit"]);
+        await _f.AddExecutor(1, subjects: ["вклад"]);
         var pending = await _f.Receive(1);
         Assert.Equal(BalanceOutcome.Pending, pending.Outcome);
 
@@ -362,10 +362,10 @@ public class OrderBalancerTests : IAsyncLifetime
         // третий берёт только вклады — треть потока
         await _f.AddExecutor(1, qualification: 1m);
         await _f.AddExecutor(2, qualification: 2m);
-        await _f.AddExecutor(3, qualification: 1m, subjects: ["deposit"]);
+        await _f.AddExecutor(3, qualification: 1m, subjects: ["вклад"]);
         for (var i = 1; i <= 900; i++)
         {
-            var subject = i % 3 == 0 ? "deposit" : "credit";
+            var subject = i % 3 == 0 ? "вклад" : "кредит";
             await _f.Receive(i, attributes: BalancerFixture.DefaultOrder(subject: subject));
             if (i > 30)
             {
