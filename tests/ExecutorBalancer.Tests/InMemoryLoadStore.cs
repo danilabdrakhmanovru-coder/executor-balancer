@@ -13,7 +13,7 @@ internal sealed class InMemoryLoadStore : ILoadStore
     private readonly Dictionary<long, int> _openCount = new();
     private readonly Dictionary<(DateOnly Day, long Executor), int> _daily = new();
     private readonly Dictionary<long, bool> _active = new();
-    private readonly Dictionary<long, (long Executor, long Weight, string State)> _orders = new();
+    private readonly Dictionary<long, (long Executor, long Weight, string State, DateOnly Day, DateTimeOffset At)> _orders = new();
     private long _version;
 
     public Task<PickResult> PickAsync(PickRequest request, CancellationToken cancellationToken)
@@ -22,7 +22,7 @@ internal sealed class InMemoryLoadStore : ILoadStore
         {
             if (_orders.TryGetValue(request.OrderId, out var existing) && (existing.State == "open" || !request.Reopen))
             {
-                return Task.FromResult(new PickResult(PickStatus.AlreadyAssigned, existing.Executor, []));
+                return Task.FromResult(new PickResult(PickStatus.AlreadyAssigned, existing.Executor, [], existing.At));
             }
 
             var report = new List<SlotReport>();
@@ -65,8 +65,9 @@ internal sealed class InMemoryLoadStore : ILoadStore
             _openWeight[id] = bestLoad + request.WeightMilli;
             _openCount[id] = _openCount.GetValueOrDefault(id) + 1;
             _daily[(request.Day, id)] = bestDaily + 1;
-            _orders[request.OrderId] = (id, request.WeightMilli, "open");
-            return Task.FromResult(new PickResult(PickStatus.Assigned, id, report));
+            var now = DateTimeOffset.UtcNow;
+            _orders[request.OrderId] = (id, request.WeightMilli, "open", request.Day, now);
+            return Task.FromResult(new PickResult(PickStatus.Assigned, id, report, now));
         }
     }
 
@@ -83,6 +84,12 @@ internal sealed class InMemoryLoadStore : ILoadStore
             _openCount[order.Executor] -= 1;
             if (release == LoadRelease.Rollback)
             {
+                var key = (order.Day, order.Executor);
+                if (_daily.GetValueOrDefault(key) > 0)
+                {
+                    _daily[key] -= 1;
+                }
+
                 _orders.Remove(orderId);
             }
             else
@@ -123,6 +130,24 @@ internal sealed class InMemoryLoadStore : ILoadStore
                 id => new ExecutorLoad(_openWeight.GetValueOrDefault(id), _openCount.GetValueOrDefault(id),
                     _daily.GetValueOrDefault((day, id))));
             return Task.FromResult(result);
+        }
+    }
+
+    /// <summary>Сдвигает момент закрепления заявки в прошлое — как будто процесс упал давно.</summary>
+    public void Backdate(long orderId, TimeSpan age)
+    {
+        lock (_gate)
+        {
+            var order = _orders[orderId];
+            _orders[orderId] = order with { At = order.At - age };
+        }
+    }
+
+    public int AssignedOn(DateOnly day, long executorId)
+    {
+        lock (_gate)
+        {
+            return _daily.GetValueOrDefault((day, executorId));
         }
     }
 

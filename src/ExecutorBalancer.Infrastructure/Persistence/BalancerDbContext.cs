@@ -16,6 +16,8 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     public DbSet<WeightRule> WeightRules => Set<WeightRule>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<ExecutorHourStat> ExecutorHourStats => Set<ExecutorHourStat>();
+    public DbSet<EligibilityHourStat> EligibilityHourStats => Set<EligibilityHourStat>();
 
     public bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
@@ -106,6 +108,22 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.EntityId).HasMaxLength(50);
             e.Property(x => x.DataJson).HasColumnType("jsonb");
             e.HasIndex(x => x.CreatedAt);
+        });
+
+        model.Entity<ExecutorHourStat>(e =>
+        {
+            e.ToTable("executor_hour_stats");
+            e.HasKey(x => new { x.BucketHour, x.ExecutorId });
+            e.Property(x => x.AssignedWeight).HasPrecision(18, 3);
+            e.Property(x => x.FreeWeight).HasPrecision(18, 3);
+        });
+
+        model.Entity<EligibilityHourStat>(e =>
+        {
+            e.ToTable("eligibility_hour_stats");
+            e.HasKey(x => new { x.BucketHour, x.SetKey });
+            e.Property(x => x.SetKey).HasMaxLength(EligibilityHourStat.MaxSetKeyLength);
+            e.Property(x => x.Weight).HasPrecision(18, 3);
         });
     }
 }

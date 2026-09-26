@@ -281,4 +281,123 @@ public class OrderBalancerTests : IAsyncLifetime
             .SingleAsync());
         return AssignmentExplanation.FromJson(json)!;
     }
+
+    [Fact]
+    public async Task OrphanedRedisHoldIsRolledBackAndOrderAssignedAgain()
+    {
+        await _f.Receive(1);
+        await _f.AddExecutor(1);
+        // процесс «упал» между выбором в Redis и записью в базу
+        var day = await _f.Run(b => Task.FromResult(b.Today()));
+        await _f.Store.PickAsync(new PickRequest(1, 1000, day, false, [new CandidateSlot(1, 1000, null)]),
+            CancellationToken.None);
+        _f.Store.Backdate(1, TimeSpan.FromMinutes(5));
+
+        var retried = await _f.Run(b => b.RetryPendingAsync(1, CancellationToken.None));
+
+        Assert.Equal(1, retried!.ExecutorId);
+        Assert.False(retried.Duplicate);
+        Assert.Equal(1, _f.Store.OpenCount(1));
+        Assert.Equal(1, _f.Store.AssignedOn(day, 1));
+        Assert.Equal(1, await _f.Query(db => db.Orders.Where(o => o.Id == 1).Select(o => o.ExecutorId).FirstAsync()));
+    }
+
+    [Fact]
+    public async Task FreshHoldOfAnotherInstanceIsNotTouched()
+    {
+        await _f.Receive(1);
+        await _f.AddExecutor(1);
+        var day = await _f.Run(b => Task.FromResult(b.Today()));
+        await _f.Store.PickAsync(new PickRequest(1, 1000, day, false, [new CandidateSlot(1, 1000, null)]),
+            CancellationToken.None);
+
+        var retried = await _f.Run(b => b.RetryPendingAsync(1, CancellationToken.None));
+
+        Assert.True(retried!.Duplicate);
+        Assert.Null(await _f.Query(db => db.Orders.Where(o => o.Id == 1).Select(o => o.ExecutorId).FirstAsync()));
+    }
+
+    [Fact]
+    public async Task RollbackReturnsDailySlot()
+    {
+        await _f.AddExecutor(1, dailyLimit: 1);
+        var day = await _f.Run(b => Task.FromResult(b.Today()));
+        await _f.Store.PickAsync(new PickRequest(1, 1000, day, false, [new CandidateSlot(1, 1000, 1)]), CancellationToken.None);
+        await _f.Store.ReleaseAsync(1, LoadRelease.Rollback, CancellationToken.None);
+
+        Assert.Equal(0, _f.Store.AssignedOn(day, 1));
+        Assert.Equal(1, (await _f.Receive(2)).ExecutorId);
+    }
+
+    [Fact]
+    public async Task HourlyStatsFollowAssignmentsAndStatuses()
+    {
+        await _f.AddExecutor(1);
+        await _f.AddExecutor(2);
+        for (var i = 1; i <= 4; i++)
+        {
+            await _f.Receive(i);
+        }
+
+        await _f.Receive(5, parentId: 1);
+        await _f.ChangeStatus(2, OrderStatus.Accept);
+        await _f.ChangeStatus(3, OrderStatus.Await);
+
+        var stats = await _f.Query(db => db.ExecutorHourStats.ToListAsync());
+        Assert.Equal(5, stats.Sum(s => s.AssignedCount));
+        Assert.Equal(4, stats.Sum(s => s.PrimaryCount));
+        Assert.Equal(1, stats.Sum(s => s.ParentCount));
+        Assert.Equal(1, stats.Sum(s => s.ClosedCount));
+        Assert.Equal(1, stats.Sum(s => s.ReturnedCount));
+        var pools = await _f.Query(db => db.EligibilityHourStats.ToListAsync());
+        var pool = Assert.Single(pools);
+        Assert.Equal("1,2", pool.SetKey);
+        Assert.Equal(4, pool.Count);
+    }
+
+    [Fact]
+    public async Task EvenFlowStaysCloseToIdealDistribution()
+    {
+        // исполнители закрывают заявки с одинаковой скоростью (FIFO с задержкой 30),
+        // третий берёт только вклады — треть потока
+        await _f.AddExecutor(1, qualification: 1m);
+        await _f.AddExecutor(2, qualification: 2m);
+        await _f.AddExecutor(3, qualification: 1m, subjects: ["deposit"]);
+        for (var i = 1; i <= 900; i++)
+        {
+            var subject = i % 3 == 0 ? "deposit" : "credit";
+            await _f.Receive(i, attributes: BalancerFixture.DefaultOrder(subject: subject));
+            if (i > 30)
+            {
+                await _f.ChangeStatus(i - 30, OrderStatus.Accept);
+            }
+        }
+
+        var report = await _f.Analytics();
+
+        var details = string.Join("; ", report.Executors.Select(e => $"#{e.Id}: {e.AssignedWeight} из {e.FairWeight}"));
+        Assert.Equal(3, report.Fairness.ExecutorsMeasured);
+        Assert.True(report.Fairness.MeanAbsDeviationPercent <= 2m, $"среднее {report.Fairness.MeanAbsDeviationPercent}%: {details}");
+        // узкий специалист получает заявки только в свои моменты и чуть недобирает — дискретность онлайн-выбора
+        Assert.True(report.Fairness.MaxAbsDeviationPercent <= 4m, $"максимум {report.Fairness.MaxAbsDeviationPercent}%: {details}");
+        Assert.Equal(900, report.Kinds.Primary);
+        Assert.Equal(870, report.Timeline.Sum(p => p.Closed));
+    }
+
+    [Fact]
+    public async Task PreviewPredictsAssignmentWithoutChangingLoad()
+    {
+        await _f.AddExecutor(1);
+        await _f.AddExecutor(2, qualification: 2m);
+        await _f.Receive(1);
+
+        var preview = await _f.Run(b => b.PreviewAsync(null,
+            BalancerFixture.Attributes(BalancerFixture.DefaultOrder()), CancellationToken.None));
+        var before = (_f.Store.OpenCount(1), _f.Store.OpenCount(2));
+        var actual = await _f.Receive(2);
+
+        Assert.Equal(preview.ChosenExecutorId, actual.ExecutorId);
+        Assert.Equal((0, 1), before);
+        Assert.Contains(preview.Candidates, c => c.Verdict == "chosen" && c.ExecutorId == actual.ExecutorId);
+    }
 }

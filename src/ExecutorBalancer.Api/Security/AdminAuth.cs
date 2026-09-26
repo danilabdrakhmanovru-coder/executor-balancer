@@ -59,7 +59,8 @@ public static class AdminAuth
     {
         var group = app.MapGroup("/api/auth").WithTags("Вход");
         group.MapPost("/login", Login).RequireRateLimiting(LoginPolicy);
-        group.MapPost("/logout", Logout);
+        // приведение к Delegate: иначе метод с одним HttpContext считается RequestDelegate и результат теряется
+        group.MapPost("/logout", (Delegate)Logout);
         group.MapGet("/me", (HttpContext context) => context.User.Identity?.IsAuthenticated == true
             ? Results.Ok(new { name = context.User.Identity.Name })
             : Results.Unauthorized());
@@ -69,8 +70,9 @@ public static class AdminAuth
     private static async Task<IResult> Login(LoginRequest request, HttpContext context, IOptions<AdminOptions> options,
         IBalancerDbContext db, CancellationToken ct)
     {
-        var expected = Encoding.UTF8.GetBytes(options.Value.Password);
-        var provided = Encoding.UTF8.GetBytes(request.Password ?? "");
+        // сравниваем хеши одинаковой длины: время проверки не выдаёт даже длину пароля
+        var expected = SHA256.HashData(Encoding.UTF8.GetBytes(options.Value.Password));
+        var provided = SHA256.HashData(Encoding.UTF8.GetBytes(request.Password ?? ""));
         var ok = CryptographicOperations.FixedTimeEquals(provided, expected);
 
         db.AuditEntries.Add(new AuditEntry

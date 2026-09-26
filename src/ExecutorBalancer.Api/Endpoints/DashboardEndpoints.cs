@@ -1,7 +1,11 @@
+using System.Globalization;
+using System.Text;
 using ExecutorBalancer.Application;
+using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ExecutorBalancer.Api.Endpoints;
 
@@ -14,15 +18,93 @@ public static class DashboardEndpoints
         group.MapGet("/summary", Summary);
         group.MapGet("/feed", Feed);
         group.MapGet("/orders/{id:long}", OrderDetails);
+        group.MapGet("/live", (AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(ct));
+        group.MapGet("/analytics", Analytics);
+        group.MapGet("/export.csv", Export);
         return app;
     }
 
-    private static async Task<IResult> Summary(IBalancerDbContext db, ExecutorDirectory directory, ILoadStore loads,
-        OrderBalancer balancer, CancellationToken ct)
+    /// <summary>Периоды отчёта в запросе: today, 24h, 7d, 30d.</summary>
+    public static bool TryParsePeriod(string? value, out AnalyticsPeriod period)
     {
+        (var ok, period) = value switch
+        {
+            null or "" or "today" => (true, AnalyticsPeriod.Today),
+            "24h" => (true, AnalyticsPeriod.Day),
+            "7d" => (true, AnalyticsPeriod.Week),
+            "30d" => (true, AnalyticsPeriod.Month),
+            _ => (false, AnalyticsPeriod.Today),
+        };
+        return ok;
+    }
+
+    public static IResult BadPeriod() => Results.ValidationProblem(new Dictionary<string, string[]>
+    {
+        ["period"] = ["допустимо: today, 24h, 7d, 30d"],
+    });
+
+    private static async Task<IResult> Analytics(string? period, AnalyticsService analytics, CancellationToken ct) =>
+        TryParsePeriod(period, out var parsed) ? Results.Ok(await analytics.BuildAsync(parsed, ct)) : BadPeriod();
+
+    /// <summary>
+    /// Выгрузка для Excel: CSV в UTF-8 с BOM и разделителем «;» — так файл открывается в русском Excel
+    /// двойным щелчком. Текстовые ячейки, начинающиеся с = + - @, экранируются: имя исполнителя приходит
+    /// из внешней системы и не должно исполниться как формула.
+    /// </summary>
+    private static async Task<IResult> Export(string? period, AnalyticsService analytics,
+        IOptions<BalancerOptions> options, CancellationToken ct)
+    {
+        if (!TryParsePeriod(period, out var parsed))
+        {
+            return BadPeriod();
+        }
+
+        var report = await analytics.BuildAsync(parsed, ct);
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
+        var csv = new StringBuilder();
+        csv.AppendLine(Row("Отчёт за период", $"{Local(report.From)} — {Local(report.To)} ({options.Value.TimeZone})"));
+        csv.AppendLine(Row("Среднее отклонение от справедливой доли, %", Number(report.Fairness.MeanAbsDeviationPercent)));
+        csv.AppendLine(Row("Максимальное отклонение, %", Number(report.Fairness.MaxAbsDeviationPercent)));
+        csv.AppendLine();
+        csv.AppendLine(Row("ID", "Исполнитель", "Активен", "Квалификация", "Назначено", "Вес назначенных",
+            "Первичные", "Перераспределения", "От родителя", "Вторичные", "Вес свободного выбора",
+            "Справедливый вес", "Отклонение, %", "Решено и отклонено", "На доработку", "Доля возвратов, %"));
+        foreach (var e in report.Executors)
+        {
+            csv.AppendLine(Row(Number(e.Id), Text(e.Name), e.IsActive ? "да" : "нет", Number(e.Qualification),
+                Number(e.Assigned), Number(e.AssignedWeight), Number(e.Primary), Number(e.Reassign), Number(e.Parent),
+                Number(e.Secondary), Number(e.FreeWeight), Number(e.FairWeight), Number(e.DeviationPercent),
+                Number(e.Closed), Number(e.Returned), Number(e.ReturnRatePercent)));
+        }
+
+        csv.AppendLine();
+        csv.AppendLine(Row("Начало интервала", "Назначено", "Вес", "Решено и отклонено", "На доработку"));
+        foreach (var point in report.Timeline)
+        {
+            csv.AppendLine(Row(Local(point.Start), Number(point.Assigned),
+                Number(point.AssignedWeight), Number(point.Closed), Number(point.Returned)));
+        }
+
+        var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+        return Results.File(bytes, "text/csv; charset=utf-8", $"executor-balancer-{period ?? "today"}.csv");
+
+        string Number(decimal? value) => value?.ToString(culture) ?? "";
+        string Local(DateTimeOffset moment) =>
+            TimeZoneInfo.ConvertTime(moment, zone).ToString("dd.MM.yyyy HH:mm", culture);
+        static string Row(params string[] cells) => string.Join(';', cells.Select(Quote));
+        static string Text(string value) => value.Length > 0 && "=+-@\t\r".Contains(value[0]) ? "'" + value : value;
+        static string Quote(string cell) =>
+            cell.IndexOfAny([';', '"', '\n', '\r']) >= 0 ? "\"" + cell.Replace("\"", "\"\"") + "\"" : cell;
+    }
+
+    private static async Task<IResult> Summary(IBalancerDbContext db, ExecutorDirectory directory, ILoadStore loads,
+        OrderBalancer balancer, AnalyticsService analytics, CancellationToken ct)
+    {
+        var today = await analytics.BuildAsync(AnalyticsPeriod.Today, ct);
+        var deviations = today.Executors.ToDictionary(e => e.Id, e => e.DeviationPercent);
         var snapshot = await directory.GetAsync(ct);
-        var today = balancer.Today();
-        var current = await loads.GetLoadsAsync(today, ct);
+        var current = await loads.GetLoadsAsync(balancer.Today(), ct);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
 
         var pending = await db.Orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId == null, ct);
@@ -49,11 +131,11 @@ public static class DashboardEndpoints
                     load.AssignedToday,
                     // нагрузка на единицу квалификации — именно её выравнивает алгоритм
                     RelativeLoad = Math.Round(openWeight / e.QualificationWeight, 3),
+                    DeviationPercent = deviations.GetValueOrDefault(e.Id),
                 };
             })
             .ToList();
 
-        var active = executors.Where(e => e.IsActive).Select(e => e.RelativeLoad).ToList();
         return Results.Ok(new
         {
             Totals = new
@@ -63,9 +145,11 @@ public static class DashboardEndpoints
                 Pending = pending,
                 AssignedLastHour = lastHour,
                 Undelivered = undelivered,
-                ActiveExecutors = active.Count,
-                Spread = active.Count > 1 ? active.Max() - active.Min() : 0m,
+                ActiveExecutors = executors.Count(e => e.IsActive),
+                AssignedToday = today.Timeline.Sum(p => p.Assigned),
+                ClosedToday = today.Timeline.Sum(p => p.Closed),
             },
+            Fairness = today.Fairness,
             RuleErrors = snapshot.RuleErrors,
             Executors = executors,
         });

@@ -55,7 +55,7 @@ internal sealed class PendingRetryWorker(
             await using var scope = scopes.CreateAsyncScope();
             var balancer = scope.ServiceProvider.GetRequiredService<OrderBalancer>();
             var result = await balancer.RetryPendingAsync(id, cancellationToken);
-            if (result?.Outcome == BalanceOutcome.Assigned)
+            if (result is { Outcome: BalanceOutcome.Assigned, Duplicate: false })
             {
                 assigned++;
             }
