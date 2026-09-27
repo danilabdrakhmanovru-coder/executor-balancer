@@ -119,6 +119,10 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .chart-small { min-height: 160px; }
 /* страница всегда длиннее окна: прокрутка до низа есть, даже когда в отделе ещё нет данных */
 #app .page-wrapper { min-height: 100vh; }
+/* подвал: после последней карточки остаётся запас, как на обычных сайтах, — видно, что страница закончилась */
+.app-footer { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; align-items: center;
+  width: 100%; margin-top: 32px; padding-top: 24px; padding-bottom: 48px; border-top: 1px solid var(--tblr-border-color);
+  color: var(--muted); font-size: 13px; }
 .chart.is-empty { min-height: 0; }
 .chart.is-empty .chart-empty { margin: 4px 0; }
 .chart-empty { color: var(--muted); font-size: 13px; margin: 24px 0; text-align: center; }

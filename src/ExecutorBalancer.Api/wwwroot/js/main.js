@@ -123,6 +123,7 @@ async function showApp() {
 let theme = 'light';
 try { theme = localStorage.getItem('eb.theme') === 'dark' ? 'dark' : 'light'; } catch { /* приватный режим */ }
 document.documentElement.setAttribute('data-bs-theme', theme);
+$('to-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 $('theme').addEventListener('click', () => {
   theme = theme === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-bs-theme', theme);
