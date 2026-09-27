@@ -371,9 +371,14 @@ public class OrderBalancerTests : IAsyncLifetime
         Assert.Equal(1, stats.Sum(s => s.ClosedCount));
         Assert.Equal(1, stats.Sum(s => s.ReturnedCount));
         var pools = await _f.Query(db => db.EligibilityHourStats.ToListAsync());
-        var pool = Assert.Single(pools);
+        var pool = Assert.Single(pools, p => !p.SetKey.StartsWith('='));
         Assert.Equal("1,2", pool.SetKey);
         Assert.Equal(4, pool.Count);
+        // заявка от родителя — без выбора: отдельная строка «=исполнитель» в той же пятиминутке
+        var parentExecutor = await _f.Query(db => db.Orders.Where(o => o.Id == 1).Select(o => o.ExecutorId).SingleAsync());
+        var pinned = Assert.Single(pools, p => p.SetKey.StartsWith('='));
+        Assert.Equal($"={parentExecutor}", pinned.SetKey);
+        Assert.Equal(1, pinned.Count);
     }
 
     [Fact]

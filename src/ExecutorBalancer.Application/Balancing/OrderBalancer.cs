@@ -648,6 +648,13 @@ public sealed class OrderBalancer(
                     pick.Report.Where(r => r.Verdict == "eligible").Select(r => r.ExecutorId), order.Weight,
                     cancellationToken);
             }
+            else
+            {
+                // назначение без выбора: эталону важно, в какую пятиминутку оно пришло
+                await ExecutorStats.RecordPinnedAsync(db, now, order.DepartmentId, executorId, order.Weight,
+                    cancellationToken);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception ex)
