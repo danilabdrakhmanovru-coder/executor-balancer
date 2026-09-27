@@ -11,6 +11,7 @@ const ACTION = {
   department_created: ['Новый отдел', 'ok'], department_renamed: ['Отдел переименован', ''],
   department_deleted: ['Отдел удалён', 'bad'],
   motivation_updated: ['Мотивация изменена', 'warn'], extra_mode_changed: ['Больше нормы', ''],
+  executors_imported: ['Загрузка из файла', 'ok'],
 };
 const MOTIVATION = [
   ['fastCloseSeconds', 'быстрое закрытие, с', (v) => v],
@@ -99,6 +100,11 @@ function describe(entry) {
       return `Создан отдел ${quote(after.name)}${after.preset ? ` — сфера ${quote(after.preset)}` : ' без шаблона'}, код для АИС: ${after.code}`;
     case 'department_renamed': return `Отдел ${quote(before.name)} переименован в ${quote(after.name)}`;
     case 'department_deleted': return `Удалён отдел ${quote(before.name)}`;
+    case 'executors_imported': {
+      const names = (after.names || []).join(', ');
+      return `Загружены сотрудники из файла: новых ${after.created ?? 0}, обновлено ${after.updated ?? 0}, `
+        + `переведено из других отделов ${after.moved ?? 0}${names ? `. ${names}` : ''}`;
+    }
     case 'motivation_updated':
       return `Настройки рейтинга и сверхнормы: ${changes(before, after, MOTIVATION.map(([key, label, show]) =>
         [key, label, (x) => show(x[key])]))}`;

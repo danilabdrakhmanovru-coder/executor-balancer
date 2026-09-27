@@ -81,19 +81,7 @@ public static class DemoEndpoints
                 return Invalid("count", $"от 1 до {MaxSeedCount}");
             }
 
-            var snapshot = await directory.GetAsync(d.Id, ct);
-            var body = new
-            {
-                Department = await CodeAsync(db, d, ct),
-                // идентификаторы в АИС общие: у каждого отдела свой диапазон, у основного — 1, 2, 3…
-                FirstId = (d.Id - 1L) * IdsPerDepartment + 1,
-                request.Count,
-                Fields = Specs(snapshot, FieldOwner.Executor),
-                Names = DomainPresets.ExecutorNames,
-                DailyLimits,
-                Qualifications,
-            };
-            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/executors/seed", body, ct)).Result;
+            return (await SeedAsync(d.Id, request.Count, db, http.CreateClient(AisOptions.HttpClientName), directory, ct)).Result;
         });
 
         // новый сотрудник отдела: заводится в АИС под следующим свободным номером из диапазона отдела
@@ -268,7 +256,7 @@ public static class DemoEndpoints
             })
             .ToList();
 
-    private sealed record Relayed(JsonElement? Body, IResult? Error)
+    internal sealed record Relayed(JsonElement? Body, IResult? Error)
     {
         public IResult Result => Error ?? Results.Ok(Body);
     }
@@ -310,6 +298,28 @@ public static class DemoEndpoints
             return new(null, Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "АИС недоступна",
                 detail: "Проверьте, что эмулятор АИС запущен"));
         }
+    }
+
+    /// <summary>
+    /// Завести в АИС сотрудников отдела со случайными навыками по его параметрам: номера — из диапазона отдела,
+    /// прежние сотрудники отдела вне набора уходят в неактивные. Используется пультом и заполнением пустых отделов.
+    /// </summary>
+    internal static async Task<Relayed> SeedAsync(int departmentId, int count, IBalancerDbContext db, HttpClient client,
+        ExecutorDirectory directory, CancellationToken ct)
+    {
+        var snapshot = await directory.GetAsync(departmentId, ct);
+        var body = new
+        {
+            Department = await CodeAsync(db, new DepartmentScope(departmentId), ct),
+            // идентификаторы в АИС общие: у каждого отдела свой диапазон, у основного — 1, 2, 3…
+            FirstId = (departmentId - 1L) * IdsPerDepartment + 1,
+            Count = count,
+            Fields = Specs(snapshot, FieldOwner.Executor),
+            Names = DomainPresets.ExecutorNames,
+            DailyLimits,
+            Qualifications,
+        };
+        return await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
     }
 
     /// <summary>Код отдела для АИС. Формат кода проверен при создании отдела — в адрес запроса он попадает как есть.</summary>

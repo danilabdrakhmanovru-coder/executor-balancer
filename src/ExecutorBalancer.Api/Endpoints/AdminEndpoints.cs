@@ -3,6 +3,7 @@ using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
+using ExecutorBalancer.Application.Executors;
 
 namespace ExecutorBalancer.Api.Endpoints;
 
@@ -65,6 +66,21 @@ public static class AdminEndpoints
         group.MapPut("/motivation", async (DepartmentScope d, MotivationInput input, ConfigurationService config,
                 CancellationToken ct) =>
             await config.UpdateMotivationAsync(d.Id, input, ct) is { } m ? Results.Ok(m) : NotFound());
+        // загрузка сотрудников из файла: шаблон отдела, проверка без записи, запись
+        group.MapGet("/executors/template.csv", async (DepartmentScope d, ExecutorImportService import, CancellationToken ct) =>
+            Results.File(await import.TemplateAsync(d.Id, ct), "text/csv; charset=utf-8", $"sotrudniki-otdel-{d.Id}.csv"));
+        group.MapPost("/executors/import", async (DepartmentScope d, bool? apply, HttpRequest request,
+            ExecutorImportService import, CancellationToken ct) =>
+        {
+            var file = await ReadBodyAsync(request, ExecutorImportService.MaxBytes, ct);
+            if (file is null)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "Файл слишком большой",
+                    detail: $"не больше {ExecutorImportService.MaxBytes / 1024} КБ");
+            }
+
+            return Results.Ok(apply == true ? await import.ApplyAsync(d.Id, file, ct) : await import.PreviewAsync(d.Id, file, ct));
+        });
         group.MapPut("/executors/{id:long}/extra", async (DepartmentScope d, long id, ExtraModeInput input,
                 ConfigurationService config, CancellationToken ct) =>
             await config.SetExtraModeAsync(d.Id, id, input, ct) ? Results.NoContent() : NotFound());
@@ -98,6 +114,25 @@ public static class AdminEndpoints
         }
 
         return Results.Ok(await balancer.PreviewAsync(d.Id, request.ParentId, request.Attributes ?? NoAttributes, ct));
+    }
+
+    /// <summary>Тело запроса целиком, но не больше limit байт; больше — null.</summary>
+    private static async Task<byte[]?> ReadBodyAsync(HttpRequest request, int limit, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        int read;
+        while ((read = await request.Body.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > limit)
+            {
+                return null;
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
     }
 
     /// <summary>Разбор по правилам для одного сотрудника: почему ему подходит или не подходит такая заявка.</summary>

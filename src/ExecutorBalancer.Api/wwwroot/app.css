@@ -324,3 +324,5 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .group-row td { background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; }
 
 .demo-badge { font-weight: 600; letter-spacing: .02em; }
+
+.import-preview { max-height: 45vh; overflow: auto; }

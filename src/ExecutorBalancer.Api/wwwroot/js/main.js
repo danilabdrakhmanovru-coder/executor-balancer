@@ -12,7 +12,7 @@ import { refreshExecutors, setExecutorsEditable, initExecutors } from './executo
 import { refreshProfile, setProfileEditable } from './profile.js';
 import { renderPresets } from './presets.js';
 import { initDepartments, loadDepartments } from './department.js';
-import { initDepartmentsAdmin, refreshDepartments } from './departments.js';
+import { initDepartmentsAdmin, refreshDepartments, setDepartmentsDemo } from './departments.js';
 import { initMotivation, refreshMotivation } from './motivation.js';
 import { refreshStart, setStartDemo } from './start.js';
 import { initOrders, refreshOrders } from './orders.js';
@@ -110,6 +110,7 @@ async function showApp() {
   setExecutorsEditable(demoEnabled);
   setProfileEditable(demoEnabled);
   setStartDemo(demoEnabled);
+  setDepartmentsDemo(demoEnabled);
   $('tab-button-demo').classList.toggle('hidden', !demoEnabled);
   // демо-режим виден сразу: значок в шапке и пояснения про тестовый стенд; в бою их нет
   $('demo-badge').classList.toggle('hidden', !demoEnabled);

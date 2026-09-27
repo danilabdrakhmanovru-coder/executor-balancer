@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.AddScoped<OrderBalancer>();
         services.AddScoped<ConfigurationService>();
         services.AddScoped<DepartmentService>();
+        services.AddScoped<Executors.ExecutorImportService>();
         services.AddScoped<AnalyticsService>();
         return services;
     }

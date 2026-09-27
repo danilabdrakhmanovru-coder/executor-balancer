@@ -255,7 +255,11 @@
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
               <p class="page-hint mb-0">Сотрудники отдела, которых передала АИС: что умеют (параметры отдела), насколько загружены и
                 сколько получили сегодня. Щёлкните по имени — откроется страница сотрудника.</p>
-              <button id="executor-add" class="btn btn-primary hidden" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить сотрудника</button>
+              <div class="btn-list">
+                <a id="executor-template" class="btn" href="/api/admin/executors/template.csv" download title="Файл для Excel: колонки по параметрам отдела и текущие сотрудники"><svg class="icon"><use href="icons.svg#download"></use></svg>Скачать шаблон</a>
+                <button id="executor-import" class="btn" type="button"><svg class="icon"><use href="icons.svg#upload"></use></svg>Загрузить из файла</button>
+                <button id="executor-add" class="btn btn-primary hidden" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить сотрудника</button>
+              </div>
             </div>
             <div id="executors-list" class="executors-grid"></div>
           </section>
@@ -610,7 +614,7 @@
       <div id="editor-body" class="form-grid"></div>
       <p id="editor-error" class="text-danger mt-3 mb-0"></p>
       <div class="dialog-actions">
-        <button type="submit" id="editor-save" class="btn btn-primary"><svg class="icon"><use href="icons.svg#check"></use></svg>Сохранить</button>
+        <button type="submit" id="editor-save" class="btn btn-primary"><svg class="icon"><use href="icons.svg#check"></use></svg><span id="editor-save-text">Сохранить</span></button>
       </div>
     </form>
   </dialog>

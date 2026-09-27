@@ -1,10 +1,11 @@
 // Исполнители: кто есть, что умеет, насколько загружен. При включённом пульте — правка через АИС,
 // как в жизни: настройки исполнителей хранятся во внешней системе, балансировщик получает их от неё.
-import { api, problemText } from './api.js';
+import { api, problemText, scoped } from './api.js';
 import { $, el, badge, button, fmt, toast, field, input, checkbox, select, icon } from './dom.js';
 import { attributeForm } from './forms.js';
 import { openEditor } from './editor.js';
 import { todayCell } from './overview.js';
+import { openImport } from './import.js';
 
 let demoEnabled = false;
 let thresholds = { qualityThreshold: 0.8, heavyQualityThreshold: 0.9 };
@@ -162,9 +163,11 @@ async function create() {
 
 export function initExecutors() {
   $('executor-add').addEventListener('click', () => { create().catch((e) => toast(problemText(e), 'bad')); });
+  $('executor-import').addEventListener('click', () => openImport(refreshExecutors));
 }
 
 export async function refreshExecutors() {
+  $('executor-template').href = scoped('/api/admin/executors/template.csv'); // шаблон — по текущему отделу
   const [summary, sources, motivation] = await Promise.all([
     api('/api/dashboard/summary'),
     demoEnabled ? api('/api/admin/demo/executors').catch(() => []) : Promise.resolve([]),
@@ -176,8 +179,8 @@ export async function refreshExecutors() {
   if (!summary.executors.length) {
     const empty = el('div', null, 'card card-body');
     empty.append(el('p', demoEnabled
-      ? 'В отделе пока нет сотрудников. Заведите их на «Тестовом стенде» (шаг 1) или кнопкой «Добавить сотрудника» — или их передаст АИС.'
-      : 'В отделе пока нет сотрудников — их передаёт АИС.', 'muted'));
+      ? 'В отделе пока нет сотрудников. Заведите их на «Тестовом стенде», кнопкой «Добавить сотрудника» или загрузите из файла.'
+      : 'В отделе пока нет сотрудников — их передаёт АИС, или загрузите их из файла (кнопка выше).', 'muted'));
     list.replaceChildren(empty);
     return;
   }
