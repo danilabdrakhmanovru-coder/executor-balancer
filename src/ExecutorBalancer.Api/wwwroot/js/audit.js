@@ -1,6 +1,7 @@
 // Журнал: изменения конфигурации и входы администратора — обычными словами, без внутренних ключей.
 import { api } from './api.js';
 import { $, el, row, badge, fmtDateTime, emptyRow } from './dom.js';
+import { ROLE_TITLE } from './session.js';
 
 const ACTION = {
   login: ['Вход', 'ok'], login_failed: ['Неверный пароль', 'bad'], preset_applied: ['Смена сферы', 'warn'],
@@ -12,6 +13,7 @@ const ACTION = {
   department_deleted: ['Отдел удалён', 'bad'],
   motivation_updated: ['Мотивация изменена', 'warn'], extra_mode_changed: ['Больше нормы', ''],
   executors_imported: ['Загрузка из файла', 'ok'],
+  user_created: ['Новый пользователь', 'ok'], user_updated: ['Пользователь изменён', 'warn'], user_deleted: ['Пользователь удалён', 'bad'],
 };
 const MOTIVATION = [
   ['fastCloseSeconds', 'быстрое закрытие, с', (v) => v],
@@ -89,8 +91,14 @@ function describe(entry) {
   const after = entry.data?.after ?? {};
   const address = String(entry.entityId || '').replace(/^::ffff:/, '');
   switch (entry.action) {
-    case 'login': return `Вход в панель администратора · адрес ${address}`;
-    case 'login_failed': return `Попытка входа с неверным паролем · адрес ${address}`;
+    case 'user_created': return `Создан пользователь ${after.login} — ${ROLE_TITLE[after.role] || after.role}`
+      + `${after.isActive === false ? ', заблокирован' : ''}`;
+    case 'user_updated': return `Пользователь ${after.login}: ${ROLE_TITLE[after.role] || after.role}`
+      + `${after.isActive === false ? ', заблокирован' : ''}${after.passwordChanged ? ', пароль сменён' : ''}`
+      + `${before.role && before.role !== after.role ? ` (была роль «${ROLE_TITLE[before.role] || before.role}»)` : ''}`;
+    case 'user_deleted': return `Удалён пользователь ${before.login}`;
+    case 'login': return `Вход · адрес ${address}`;
+    case 'login_failed': return `Попытка входа с неверным логином или паролем · адрес ${address}`;
     case 'preset_applied': {
       const was = before.preset ? ` Было: ${quote(before.preset)}.`
         : Array.isArray(before.fields) ? ` Было: своя настройка — параметров ${before.fields.length}, правил ${(before.rules || []).length}.` : '';

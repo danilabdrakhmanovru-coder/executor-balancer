@@ -6,6 +6,7 @@ import { attributeForm } from './forms.js';
 import { openEditor } from './editor.js';
 import { todayCell } from './overview.js';
 import { openImport } from './import.js';
+import { can } from './session.js';
 
 let demoEnabled = false;
 let thresholds = { qualityThreshold: 0.8, heavyQualityThreshold: 0.9 };
@@ -39,11 +40,11 @@ function card(e, source) {
 
   const skills = el('dl', null, 'skills');
   for (const s of e.skills || []) skills.append(el('dt', s.label), el('dd', s.value));
-  if (!(e.skills || []).length) skills.append(el('dd', 'параметры не заданы', 'muted'));
-  box.append(skills);
+  // без навыков — отдельной строкой с переносом: в сетке «название — значение» длинный текст распирал карточку
+  box.append((e.skills || []).length ? skills : el('p', 'навыки не заданы — подходит к любым заявкам', 'warn-text small mb-0'));
 
   const actions = el('div', null, 'row-actions');
-  if (e.dailyLimit != null) {
+  if (e.dailyLimit != null && can('Manager')) {
     actions.append(button(e.extraPercent > 0 ? `Больше нормы: +${e.extraPercent}%` : 'Больше нормы…', () => extraMode(e),
       e.extraPercent > 0 ? 'btn btn-sm btn-success' : 'btn btn-sm', 'flame'));
   }
@@ -185,4 +186,41 @@ export async function refreshExecutors() {
     return;
   }
   list.replaceChildren(...summary.executors.map((e) => card(e, byId.get(e.id))));
+  renderSkillWarning(summary.executors);
+}
+
+/**
+ * Сотрудники без навыков: правила их не ограничивают, и они получают заявки любого вида — больше остальных.
+ * Обычно так бывает, когда сотрудники заведены до смены сферы отдела. Подсказываем, как заполнить навыки.
+ */
+function renderSkillWarning(executors) {
+  const box = $('executors-warning');
+  const missing = executors.filter((e) => e.isActive && !(e.skills || []).length);
+  box.classList.toggle('hidden', !missing.length);
+  if (!missing.length) { box.replaceChildren(); return; }
+  const text = el('div', null);
+  text.append(el('strong', `У ${missing.length} из ${executors.length} сотрудников не заданы навыки. `),
+    'Правила подбора их не ограничивают, поэтому они подходят к любой заявке и получают больше остальных. '
+    + 'Так бывает, если сотрудники заведены до смены сферы отдела или АИС не передала их параметры.');
+  const bar = el('div', null, 'btn-list mt-2');
+  if (can('Manager')) {
+    bar.append(button('Загрузить навыки из файла', () => openImport(refreshExecutors), 'btn btn-sm', 'upload'));
+  }
+  if (demoEnabled) {
+    const count = Math.min(100, Math.max(executors.length, 10));
+    const reseed = button(`Заменить тестовыми с навыками (${count})`, async () => {
+      if (!confirm(`Завести ${count} тестовых сотрудников с навыками по параметрам отдела? Прежние тестовые сотрудники отдела будут заменены.`)) return;
+      reseed.disabled = true;
+      try {
+        await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count } });
+        toast('Тестовые сотрудники с навыками заведены');
+        await refreshExecutors();
+      } catch (e) {
+        toast(problemText(e), 'bad');
+        reseed.disabled = false;
+      }
+    }, 'btn btn-sm btn-warning', 'wand');
+    bar.append(reseed);
+  }
+  box.replaceChildren(text, ...(bar.childElementCount ? [bar] : []));
 }

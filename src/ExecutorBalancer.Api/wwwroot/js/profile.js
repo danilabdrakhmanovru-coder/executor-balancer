@@ -6,6 +6,7 @@ import { columns } from './charts.js';
 import { KIND } from './explain.js';
 import { openOrder, todayCell } from './overview.js';
 import { edit, extraMode, setActive } from './executors.js';
+import { can } from './session.js';
 
 const STATUS = { Processed: ['в работе', ''], Await: ['на доработке', 'warn'], Accept: ['решена', 'ok'], Reject: ['отклонена', 'ok'], Moved: ['передана другому', ''] };
 let demoEnabled = false;
@@ -36,7 +37,7 @@ function header(p, source) {
 
   const after = () => refreshProfile(p.id);
   const actions = el('div', null, 'btn-list');
-  if (p.dailyLimit != null) {
+  if (p.dailyLimit != null && can('Manager')) {
     actions.append(button(p.extraPercent > 0 ? `Больше нормы: +${p.extraPercent}%` : 'Больше нормы…', () => extraMode(p, after),
       p.extraPercent > 0 ? 'btn btn-success' : 'btn', 'flame'));
   }

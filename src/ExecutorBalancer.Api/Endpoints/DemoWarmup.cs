@@ -21,6 +21,8 @@ public sealed class DemoWarmup(IServiceScopeFactory scopes, IOptions<DemoOptions
     {
         if (!options.Value.Enabled)
         {
+            // видно в «docker compose logs api»: частая причина пустых отделов на показе — не включён демо-режим
+            logger.LogInformation("Демо-режим выключен (DEMO_ENABLED): тестовые сотрудники не заводятся");
             return;
         }
 
@@ -36,6 +38,11 @@ public sealed class DemoWarmup(IServiceScopeFactory scopes, IOptions<DemoOptions
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogDebug(ex, "Заполнение демо-отделов: повторим");
+            }
+
+            if (attempt == 1)
+            {
+                logger.LogInformation("Демо: ждём эмулятор АИС, чтобы завести сотрудников (запущен ли он с COMPOSE_PROFILES=demo?)");
             }
 
             await Task.Delay(RetryDelay, stoppingToken);

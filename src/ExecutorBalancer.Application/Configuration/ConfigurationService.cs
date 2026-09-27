@@ -22,7 +22,8 @@ public sealed class ConfigurationService(
     ExecutorDirectory directory,
     IOptions<BalancerOptions> options,
     TimeProvider clock,
-    ILogger<ConfigurationService> logger)
+    ILogger<ConfigurationService> logger,
+    Users.ICurrentActor actor)
 {
     public const int MaxFieldsPerOwner = FieldCatalog.MaxAttributes;
     public const int MaxRules = 200;
@@ -35,7 +36,6 @@ public sealed class ConfigurationService(
     public const decimal MinWeight = 0.1m;
     public const decimal MaxWeight = 1000m;
     private const int MaxValueJsonLength = 8000;
-    private const string Actor = "admin";
 
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web)
     {
@@ -69,10 +69,16 @@ public sealed class ConfigurationService(
 
     /// <summary>Журнал: изменения конфигурации и входы администратора, новые сверху.</summary>
     /// <remarks>Изменения этого отдела и общие события (входы, создание и удаление отделов).</remarks>
+    /// <param name="security">Входы и пользователи (адреса, логины) — только для администратора.</param>
     public async Task<IReadOnlyList<AuditView>> GetAuditAsync(int departmentId, long? beforeId, int limit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool security = true)
     {
         var query = db.AuditEntries.AsNoTracking().Where(a => a.DepartmentId == departmentId || a.DepartmentId == null);
+        if (!security)
+        {
+            query = query.Where(a => a.Entity != "session" && a.Entity != "user");
+        }
+
         if (beforeId is { } before)
         {
             query = query.Where(a => a.Id < before);
@@ -243,7 +249,7 @@ public sealed class ConfigurationService(
             db.AuditEntries.Add(new AuditEntry
             {
                 DepartmentId = departmentId,
-                Actor = Actor,
+                Actor = actor.Name,
                 Action = "preset_applied",
                 Entity = "preset",
                 EntityId = preset.Id,
@@ -278,6 +284,7 @@ public sealed class ConfigurationService(
         var label = Label(input.Label, errors);
         var type = input.Type is { } t && Enum.IsDefined(t) ? t : Fail<FieldType>(errors, "type", "String, Number, Boolean, Enum или Array");
         var fieldOptions = NormalizeOptions(type, input.Options, errors);
+        var optionLabels = NormalizeOptionLabels(fieldOptions, input.OptionLabels, [], [], errors);
         ThrowIfAny(errors);
 
         if (await db.FieldDefinitions.CountAsync(f => f.DepartmentId == departmentId && f.Owner == owner, cancellationToken) >= MaxFieldsPerOwner)
@@ -293,6 +300,7 @@ public sealed class ConfigurationService(
         var field = new FieldDefinition
         {
             DepartmentId = departmentId, Owner = owner, Key = key, Label = label, Type = type, Options = fieldOptions,
+            OptionLabels = optionLabels,
         };
         db.FieldDefinitions.Add(field);
         await SaveWithAuditAsync(departmentId, "field_created", "field", () => field.Id, null, Snapshot(field), cancellationToken);
@@ -327,6 +335,7 @@ public sealed class ConfigurationService(
 
         var label = Label(input.Label, errors);
         var fieldOptions = NormalizeOptions(field.Type, input.Options, errors);
+        var optionLabels = NormalizeOptionLabels(fieldOptions, input.OptionLabels, field.Options, field.OptionLabels, errors);
         ThrowIfAny(errors);
 
         var before = Snapshot(field);
@@ -342,6 +351,7 @@ public sealed class ConfigurationService(
 
         field.Label = label;
         field.Options = fieldOptions;
+        field.OptionLabels = optionLabels;
         await SaveWithAuditAsync(departmentId, "field_updated", "field", () => field.Id, before, Snapshot(field), cancellationToken);
 
         var rules = await db.Rules.AsNoTracking().Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken);
@@ -622,7 +632,7 @@ public sealed class ConfigurationService(
             db.AuditEntries.Add(new AuditEntry
             {
                 DepartmentId = departmentId,
-                Actor = Actor,
+                Actor = actor.Name,
                 Action = action,
                 Entity = entity,
                 EntityId = entityId().ToString(CultureInfo.InvariantCulture),
@@ -703,6 +713,38 @@ public sealed class ConfigurationService(
         return list.ToArray();
     }
 
+    /// <summary>
+    /// Подписи значений: по одной на значение справочника (пустая — показывать само значение). Не переданы —
+    /// прежние подписи переносятся на те же значения, даже если порядок или состав справочника изменился.
+    /// </summary>
+    private static string[] NormalizeOptionLabels(string[] options, string[]? labels, string[] oldOptions, string[] oldLabels,
+        Dictionary<string, string[]> errors)
+    {
+        if (labels is null)
+        {
+            var old = new FieldDefinition { Options = oldOptions, OptionLabels = oldLabels };
+            var kept = options.Select(o => old.Show(o) is var shown && shown != o ? shown : "").ToArray();
+            return kept.Any(l => l.Length > 0) ? kept : [];
+        }
+
+        var list = labels.Select(l => l?.Trim() ?? "").ToArray();
+        if (list.All(l => l.Length == 0))
+        {
+            return [];
+        }
+
+        if (list.Length != options.Length)
+        {
+            errors["optionLabels"] = ["подписей должно быть столько же, сколько значений справочника"];
+        }
+        else if (list.Any(l => l.Length > MaxOptionLength || l.Any(char.IsControl)))
+        {
+            errors["optionLabels"] = [$"подпись не длиннее {MaxOptionLength} символов"];
+        }
+
+        return list;
+    }
+
     private static int Priority(int value, Dictionary<string, string[]> errors)
     {
         if (value is < 0 or > MaxPriority)
@@ -768,7 +810,7 @@ public sealed class ConfigurationService(
                                && (r.ExecutorField == field.Key || r.ExecutorFieldUpper == field.Key));
         var hint = DomainPresets.Hint(field.Owner, field.Key);
         return new FieldView(field.Id, field.Owner, field.Key, field.Label, field.Type, field.Options, used,
-            hint?.Min ?? hint?.Choices?.Min(), hint?.Max ?? hint?.Choices?.Max());
+            hint?.Min ?? hint?.Choices?.Min(), hint?.Max ?? hint?.Choices?.Max(), field.OptionLabels);
     }
 
     private static RuleView ToView(Rule rule, FieldCatalog catalog) => new(
@@ -857,7 +899,7 @@ public sealed class ConfigurationService(
         }
     }
 
-    private static object Snapshot(FieldDefinition f) => new { f.Owner, f.Key, f.Label, f.Type, f.Options };
+    private static object Snapshot(FieldDefinition f) => new { f.Owner, f.Key, f.Label, f.Type, f.Options, f.OptionLabels };
 
     private static object Snapshot(Rule r) => new
     {

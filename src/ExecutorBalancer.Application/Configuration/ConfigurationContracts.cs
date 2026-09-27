@@ -4,7 +4,9 @@ using ExecutorBalancer.Domain;
 namespace ExecutorBalancer.Application.Configuration;
 
 /// <summary>Параметр заявки или исполнителя. Owner, Key и Type после создания не меняются.</summary>
-public sealed record FieldInput(FieldOwner? Owner, string? Key, string? Label, FieldType? Type, string[]? Options);
+/// <param name="OptionLabels">Подписи значений для экрана по порядку Options; null — оставить прежние.</param>
+public sealed record FieldInput(FieldOwner? Owner, string? Key, string? Label, FieldType? Type, string[]? Options,
+    string[]? OptionLabels = null);
 
 /// <summary>
 /// Правило подбора. Value — константа в JSON, если Target = Constant
@@ -33,7 +35,7 @@ public sealed record WeightRuleInput(
 
 /// <param name="SampleMin">Правдоподобный диапазон числа для «Заполнить примером» (из шаблона сферы).</param>
 public sealed record FieldView(int Id, FieldOwner Owner, string Key, string Label, FieldType Type, string[] Options,
-    int UsedByRules, decimal? SampleMin = null, decimal? SampleMax = null);
+    int UsedByRules, decimal? SampleMin = null, decimal? SampleMax = null, string[]? OptionLabels = null);
 
 public sealed record RuleView(
     int Id,

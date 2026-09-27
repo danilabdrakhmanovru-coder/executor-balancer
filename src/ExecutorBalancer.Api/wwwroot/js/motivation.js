@@ -2,6 +2,7 @@
 // Доли (0–1) показываются в процентах — так понятнее; на сервер уходят долями.
 import { api, problemText } from './api.js';
 import { $, field, input, toast } from './dom.js';
+import { can } from './session.js';
 
 const FIELDS = [
   ['fastCloseSeconds', 'Подозрительно быстрое закрытие, секунд', 'seconds', 'Закрытие быстрее — признак работы «на скорость». 0 — не проверять.'],
@@ -28,6 +29,7 @@ export async function refreshMotivation() {
     const attrs = kind === 'weight' ? { min: '0.1', max: '1000', step: '0.1' }
       : kind === 'seconds' ? { min: '0', max: '86400', step: '1' } : { min: '0', max: '100', step: '1' };
     const control = input('number', toShown(kind, m[key]), { ...attrs, required: '' });
+    control.disabled = !can('Admin'); // остальные роли видят настройки, менять их может администратор
     controls[key] = [control, kind];
     return field(label, control, hint);
   }));

@@ -311,6 +311,31 @@ namespace ExecutorBalancer.Infrastructure.Persistence.Migrations
                     b.ToTable("executor_hour_stats", (string)null);
                 });
 
+            modelBuilder.Entity("ExecutorBalancer.Domain.ExecutorQualification", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ExecutorId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Qualification")
+                        .HasPrecision(10, 3)
+                        .HasColumnType("numeric(10,3)");
+
+                    b.Property<DateTimeOffset>("ValidFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExecutorId", "ValidFrom");
+
+                    b.ToTable("executor_qualifications", (string)null);
+                });
+
             modelBuilder.Entity("ExecutorBalancer.Domain.FieldDefinition", b =>
                 {
                     b.Property<int>("Id")
@@ -331,6 +356,10 @@ namespace ExecutorBalancer.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
+
+                    b.PrimitiveCollection<string[]>("OptionLabels")
+                        .IsRequired()
+                        .HasColumnType("text[]");
 
                     b.PrimitiveCollection<string[]>("Options")
                         .IsRequired()
@@ -549,6 +578,60 @@ namespace ExecutorBalancer.Infrastructure.Persistence.Migrations
                     b.HasIndex("DepartmentId");
 
                     b.ToTable("rules", (string)null);
+                });
+
+            modelBuilder.Entity("ExecutorBalancer.Domain.User", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<int[]>("DepartmentIds")
+                        .IsRequired()
+                        .HasColumnType("integer[]");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("LastLoginAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("SecurityStamp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Login")
+                        .IsUnique();
+
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("ExecutorBalancer.Domain.WeightRule", b =>

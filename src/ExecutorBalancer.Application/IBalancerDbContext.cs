@@ -18,6 +18,8 @@ public interface IBalancerDbContext
     DbSet<OrderStatusChange> OrderStatusChanges { get; }
     DbSet<ExecutorHourStat> ExecutorHourStats { get; }
     DbSet<EligibilityHourStat> EligibilityHourStats { get; }
+    DbSet<User> Users { get; }
+    DbSet<ExecutorQualification> ExecutorQualifications { get; }
 
     DatabaseFacade Database { get; }
 

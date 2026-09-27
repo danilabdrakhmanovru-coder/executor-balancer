@@ -2,11 +2,17 @@
 // в ручной заявке пульта демонстрации и в редакторе исполнителя.
 import { el, field, input, select, checkbox } from './dom.js';
 
+/** Подпись значения справочника для экрана (ORDER_3 → «Претензия»); без подписи — само значение. */
+export function optionText(f, value) {
+  const label = f?.optionLabels?.[f.options.indexOf(value)];
+  return label || value;
+}
+
 function control(f, value) {
   switch (f.type) {
     case 'Enum':
       if (!f.options.length) return { node: input('text', value, { maxlength: '500' }) };
-      return { node: select([['', '— не указано —'], ...f.options.map((o) => [o, o])], value ?? '') };
+      return { node: select([['', '— не указано —'], ...f.options.map((o) => [o, optionText(f, o)])], value ?? '') };
     case 'Boolean':
       return { node: select([['', '— не указано —'], ['true', 'да'], ['false', 'нет']], value === undefined || value === null ? '' : String(value)) };
     case 'Number':
@@ -15,7 +21,7 @@ function control(f, value) {
       if (!f.options.length) return { node: input('text', Array.isArray(value) ? value.join(', ') : '', { placeholder: 'через запятую' }) };
       const wrap = el('div', null, 'value-editor checks');
       const chosen = new Set(Array.isArray(value) ? value.map(String) : []);
-      const boxes = f.options.map((o) => { const c = checkbox(chosen.has(o), o); wrap.append(c.wrap); return [o, c.box]; });
+      const boxes = f.options.map((o) => { const c = checkbox(chosen.has(o), optionText(f, o)); wrap.append(c.wrap); return [o, c.box]; });
       return { node: wrap, boxes };
     }
     default:

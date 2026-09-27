@@ -48,6 +48,17 @@ services:
       Swagger__Enabled: ${SWAGGER_ENABLED:-false}
       # демо-режим: вкладка «Тестовый стенд» и управление эмулятором АИС из интерфейса; в бою — выключен
       Demo__Enabled: ${DEMO_ENABLED:-false}
+      # ИИ-разбор заявок (необязательно): модель с OpenAI-совместимым API; без адреса — выключен
+      Ai__BaseUrl: ${AI_BASE_URL:-}
+      Ai__Model: ${AI_MODEL:-}
+      Ai__ApiKey: ${AI_API_KEY:-}
+      Ai__Project: ${AI_PROJECT:-}
+      # своя модель без видеокарты отвечает медленно: сколько ждать ответа и сколько слов разрешить в ответе
+      Ai__TimeoutSeconds: ${AI_TIMEOUT_SECONDS:-90}
+      Ai__MaxTokens: ${AI_MAX_TOKENS:-1500}
+    # чтобы из контейнера была видна модель, запущенная на этом же компьютере (Ollama): http://host.docker.internal:11434/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8080:8080"
     read_only: true

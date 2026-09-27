@@ -18,8 +18,9 @@ public sealed record GeneratorHint(
     int? MaxItems = null,
     string[]? Required = null);
 
+/// <param name="OptionLabels">Подписи значений для экрана (по порядку Options), если сами значения — коды.</param>
 public sealed record PresetField(FieldOwner Owner, string Key, string Label, FieldType Type, string[] Options,
-    GeneratorHint? Hint = null);
+    GeneratorHint? Hint = null, string[]? OptionLabels = null);
 
 public sealed record PresetRule(string Name, string OrderField, RuleOperator Operator, string? ExecutorField,
     string? ExecutorFieldUpper = null);
@@ -44,7 +45,9 @@ public static class DomainPresets
 {
     public const string DefaultId = "bank";
 
-    private static readonly string[] OrderTypes = ["ORDER_1", "ORDER_2", "ORDER_3"];
+    // коды типов — как в модели данных кейса (их присылает АИС); смысл в кейсе не задан, подписи — наша трактовка
+    public static readonly string[] OrderTypes = ["ORDER_1", "ORDER_2", "ORDER_3"];
+    public static readonly string[] OrderTypeLabels = ["Консультация", "Оформление", "Претензия"];
     private static readonly string[] Subjects = ["кредит", "вклад", "карты", "ипотека", "страхование"];
     private static readonly string[] Segments = ["микро", "малый", "средний", "крупный"];
     private static readonly string[] ClientClasses = ["обычный", "VIP"];
@@ -56,13 +59,13 @@ public static class DomainPresets
         + "Исполнитель подходит, если сумма в его полномочиях и он работает с такими тематиками и клиентами.",
         [
             new(FieldOwner.Order, "sum", "Сумма заявки", FieldType.Number, [], new(Min: 5_000, Max: 5_000_000, LogScale: true)),
-            new(FieldOwner.Order, "order_type", "Тип заявки", FieldType.Enum, OrderTypes),
+            new(FieldOwner.Order, "order_type", "Тип заявки", FieldType.Enum, OrderTypes, OptionLabels: OrderTypeLabels),
             new(FieldOwner.Order, "subject", "Тематика", FieldType.Enum, Subjects),
             new(FieldOwner.Order, "client_segment", "Сегмент клиента", FieldType.Enum, Segments),
             new(FieldOwner.Order, "client_class", "Категория клиента", FieldType.Enum, ClientClasses, new(Weights: [0.92, 0.08])),
             new(FieldOwner.Executor, "min_sum", "Минимальная сумма", FieldType.Number, [], new(Choices: [0])),
             new(FieldOwner.Executor, "max_sum", "Максимальная сумма", FieldType.Number, [], new(Choices: [500_000, 2_000_000, 10_000_000])),
-            new(FieldOwner.Executor, "order_types", "Типы заявок", FieldType.Array, OrderTypes, new(MinItems: 3)),
+            new(FieldOwner.Executor, "order_types", "Типы заявок", FieldType.Array, OrderTypes, new(MinItems: 3), OrderTypeLabels),
             new(FieldOwner.Executor, "subjects", "Тематики", FieldType.Array, Subjects, new(MinItems: 2)),
             new(FieldOwner.Executor, "segments", "Сегменты клиентов", FieldType.Array, Segments, new(MinItems: 3)),
             new(FieldOwner.Executor, "client_classes", "Категории клиентов", FieldType.Array, ClientClasses, new(Required: ["обычный"])),
@@ -192,7 +195,11 @@ public static class DomainPresets
         DomainPreset preset, DateTimeOffset now, int departmentId)
     {
         var fields = preset.Fields
-            .Select(f => new FieldDefinition { DepartmentId = departmentId, Owner = f.Owner, Key = f.Key, Label = f.Label, Type = f.Type, Options = f.Options })
+            .Select(f => new FieldDefinition
+            {
+                DepartmentId = departmentId, Owner = f.Owner, Key = f.Key, Label = f.Label, Type = f.Type, Options = f.Options,
+                OptionLabels = f.OptionLabels ?? [],
+            })
             .ToList();
         var rules = preset.Rules.Select((r, i) => new Rule
         {

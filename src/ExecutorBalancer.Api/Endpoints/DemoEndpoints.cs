@@ -36,7 +36,7 @@ public sealed record DemoOrderRequest(long? ParentId, Dictionary<string, JsonEle
 /// </summary>
 public static class DemoEndpoints
 {
-    public const int MaxSeedCount = 50;
+    public const int MaxSeedCount = 100; // столько же принимает эмулятор АИС
     public const double MaxRatePerHour = 72_000;
     private const long IdsPerDepartment = 1000;
 
@@ -47,7 +47,7 @@ public static class DemoEndpoints
     {
         var group = app.MapGroup("/api/admin/demo")
             .WithTags("Демонстрация")
-            .RequireAuthorization()
+            .RequireAuthorization(Policies.Admin)
             .AddEndpointFilter<CsrfHeaderFilter>()
             .AddEndpointFilter(async (context, next) =>
                 context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled

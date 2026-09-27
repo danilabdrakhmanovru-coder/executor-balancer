@@ -20,15 +20,46 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     public DbSet<OrderStatusChange> OrderStatusChanges => Set<OrderStatusChange>();
     public DbSet<ExecutorHourStat> ExecutorHourStats => Set<ExecutorHourStat>();
     public DbSet<EligibilityHourStat> EligibilityHourStats => Set<EligibilityHourStat>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<ExecutorQualification> ExecutorQualifications => Set<ExecutorQualification>();
 
     public bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
     public void Detach(object entity) => Entry(entity).State = EntityState.Detached;
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        // тесты идут на SQLite, а он не сравнивает даты с часовым поясом в запросах — храним их там числом;
+        // в PostgreSQL (боевая база) это timestamptz, как и было
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            configurationBuilder.Properties<DateTimeOffset>()
+                .HaveConversion<Microsoft.EntityFrameworkCore.Storage.ValueConversion.DateTimeOffsetToBinaryConverter>();
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var model = modelBuilder;
+        model.Entity<ExecutorQualification>(e =>
+        {
+            e.ToTable("executor_qualifications");
+            e.Property(x => x.Qualification).HasPrecision(10, 3);
+            e.HasIndex(x => new { x.ExecutorId, x.ValidFrom });
+        });
+
+        model.Entity<User>(e =>
+        {
+            e.ToTable("users");
+            e.Property(x => x.Login).HasMaxLength(32);
+            e.Property(x => x.DisplayName).HasMaxLength(120);
+            e.Property(x => x.PasswordHash).HasMaxLength(200);
+            e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.SecurityStamp).HasMaxLength(64);
+            e.HasIndex(x => x.Login).IsUnique();
+        });
+
         model.Entity<Department>(e =>
         {
             e.ToTable("departments");

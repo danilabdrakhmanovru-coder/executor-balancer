@@ -19,10 +19,15 @@
       </div>
       <form id="login-form" class="card card-md">
         <div class="card-body">
-          <h2 class="h2 text-center mb-4">Вход администратора</h2>
+          <h2 class="h2 text-center mb-4">Вход</h2>
+          <label class="form-label" for="login-name">Логин</label>
+          <input id="login-name" class="form-control mb-3" type="text" autocomplete="username" required maxlength="32"
+            autocapitalize="none" spellcheck="false" value="admin">
           <label class="form-label" for="password">Пароль</label>
           <input id="password" class="form-control" type="password" autocomplete="current-password" required maxlength="200">
           <p id="login-error" class="text-danger mt-2 mb-0"></p>
+          <p class="text-secondary small mt-2 mb-0">Администратор входит под логином «admin» с паролем из настроек сервера,
+            остальных пользователей заводит администратор в «Настройки → Пользователи».</p>
           <div class="form-footer mt-3">
             <button type="submit" class="btn btn-primary w-100">Войти</button>
           </div>
@@ -47,12 +52,15 @@
           <span id="department-sphere" class="dept-sphere d-none d-lg-inline"></span>
         </div>
         <div class="navbar-nav flex-row ms-auto align-items-center gap-2">
-          <span id="demo-badge" class="badge bg-orange-lt demo-badge hidden" title="Включены тестовый стенд и эмулятор АИС. В боевом запуске (DEMO_ENABLED=false) их нет">демо-режим</span>
-          <span id="updated" class="text-secondary small d-none d-md-inline"></span>
+          <span id="updated" class="text-secondary small d-none d-xl-inline"></span>
           <button id="theme" class="btn btn-icon btn-ghost-secondary" type="button" title="Светлая или тёмная тема" aria-label="Тема">
             <svg class="icon theme-dark"><use href="icons.svg#moon"></use></svg>
             <svg class="icon theme-light"><use href="icons.svg#sun"></use></svg>
           </button>
+          <span class="user-chip" id="user-chip" title="Вы вошли как">
+            <svg class="icon"><use href="icons.svg#user-circle"></use></svg>
+            <span class="user-text"><span id="user-name" class="user-name"></span><span id="user-role" class="user-role"></span></span>
+          </span>
           <button id="logout" class="btn btn-outline-secondary" type="button">
             <svg class="icon"><use href="icons.svg#logout"></use></svg><span class="d-none d-sm-inline">Выйти</span>
           </button>
@@ -62,14 +70,14 @@
     <nav class="app-nav d-print-none">
       <div class="container-xl">
         <div class="app-tabs" id="tabs">
-          <button data-tab="start" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#route"></use></svg>Как это работает</button>
-          <button data-tab="orders" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#file-text"></use></svg>Заявки</button>
-          <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Мониторинг</button>
-          <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Сотрудники</button>
-          <button data-tab="analytics" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Аналитика</button>
-          <button data-tab="constructor" data-group="settings" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#settings"></use></svg>Настройки</button>
-          <button data-tab="audit" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#history"></use></svg>Журнал</button>
-          <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Заменяет настоящую АИС на демонстрации: создаёт заявки и сотрудников"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Тестовый стенд</button>
+          <button data-group="home" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#home"></use></svg>Главная</button>
+          <button data-group="work" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Работа</button>
+          <button data-group="analysis" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Анализ</button>
+          <button data-group="settings" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#settings"></use></svg>Настройки</button>
+          <div class="nav-right">
+            <span id="demo-badge" class="badge bg-orange-lt demo-badge hidden" title="Это тот же продукт, но заявки и сотрудники приходят от эмулятора АИС (тестовый стенд), а не от настоящей АИС. В боевом запуске демо выключается одной строкой DEMO_ENABLED=false — значка и стенда не будет">демо: тестовые данные</span>
+            <button data-group="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Заменяет настоящую АИС на демонстрации: создаёт заявки и сотрудников"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Тестовый стенд</button>
+          </div>
         </div>
       </div>
     </nav>
@@ -77,6 +85,8 @@
     <div class="page-wrapper">
       <div class="page-body">
         <div class="container-xl">
+          <!-- подменю раздела: строится из GROUPS в main.js с учётом роли -->
+          <div id="subnav" class="btn-group subnav hidden" role="group" aria-label="Подраздел"></div>
 
           <!-- Как это работает -->
           <section id="tab-start" class="tab-page hidden">
@@ -178,8 +188,8 @@
                   <div class="card-header"><h3 class="card-title"><span class="step-no">1</span>Сотрудники отдела</h3></div>
                   <div class="card-body">
                     <p class="text-secondary">Заводит сотрудников этого отдела в АИС со случайными навыками, опытом и дневными
-                      лимитами по параметрам отдела. АИС передаёт их балансировщику. Прежние сотрудники отдела сверх нового числа
-                      уходят в неактивные; другие отделы не затрагиваются.</p>
+                      лимитами по параметрам отдела. АИС передаёт их балансировщику. Число — сколько всего сотрудников будет в
+                      отделе (не прибавка): прежние сверх него уходят в неактивные; другие отделы не затрагиваются.</p>
                     <div id="demo-seed-count" class="mb-3"></div>
                     <div class="btn-list">
                       <button id="demo-seed" class="btn btn-primary" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Завести сотрудников</button>
@@ -256,11 +266,12 @@
               <p class="page-hint mb-0">Сотрудники отдела, которых передала АИС: что умеют (параметры отдела), насколько загружены и
                 сколько получили сегодня. Щёлкните по имени — откроется страница сотрудника.</p>
               <div class="btn-list">
-                <a id="executor-template" class="btn" href="/api/admin/executors/template.csv" download title="Файл для Excel: колонки по параметрам отдела и текущие сотрудники"><svg class="icon"><use href="icons.svg#download"></use></svg>Скачать шаблон</a>
-                <button id="executor-import" class="btn" type="button"><svg class="icon"><use href="icons.svg#upload"></use></svg>Загрузить из файла</button>
+                <a id="executor-template" class="btn need-manager" href="/api/admin/executors/template.csv" download title="Файл для Excel: колонки по параметрам отдела и текущие сотрудники"><svg class="icon"><use href="icons.svg#download"></use></svg>Скачать шаблон</a>
+                <button id="executor-import" class="btn need-manager" type="button"><svg class="icon"><use href="icons.svg#upload"></use></svg>Загрузить из файла</button>
                 <button id="executor-add" class="btn btn-primary hidden" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить сотрудника</button>
               </div>
             </div>
+            <div id="executors-warning" class="alert alert-warning hidden" role="status"></div>
             <div id="executors-list" class="executors-grid"></div>
           </section>
 
@@ -413,12 +424,68 @@
           </section>
 
           <!-- Настройки: подменю -->
-          <div id="settings-nav" class="btn-group settings-nav hidden" role="group" aria-label="Раздел настроек">
-            <button class="btn" data-tab="constructor" type="button"><svg class="icon"><use href="icons.svg#adjustments"></use></svg>Параметры и правила</button>
-            <button class="btn" data-tab="motivation" type="button"><svg class="icon"><use href="icons.svg#trophy"></use></svg>Рейтинг и сверхнорма</button>
-            <button class="btn" data-tab="preview" type="button"><svg class="icon"><use href="icons.svg#zoom-check"></use></svg>Проверка заявки</button>
-            <button class="btn" data-tab="departments" type="button"><svg class="icon"><use href="icons.svg#building"></use></svg>Отделы</button>
-          </div>
+
+          <!-- Анализ → Разбор заявок -->
+          <section id="tab-insights" class="tab-page hidden">
+            <p class="page-hint">Разбор заявок отдела за последние 24 часа: какие заявки приходят, хватает ли сотрудников с нужными
+              навыками, где копится очередь и доработки. Цифры считает сервер; ИИ по этим цифрам пишет выводы и советы
+              руководителю. В модель уходит только сводка — без ФИО сотрудников и текста заявок, а распределение от ИИ не зависит.</p>
+            <div class="card" id="ai-card">
+              <div class="card-header">
+                <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#sparkles"></use></svg>ИИ-разбор</h3>
+                <div class="card-actions">
+                  <button id="ai-run" class="btn btn-primary need-manager" type="button"><svg class="icon"><use href="icons.svg#sparkles"></use></svg><span id="ai-run-text">Разобрать с ИИ</span></button>
+                </div>
+              </div>
+              <div class="card-body">
+                <p id="ai-status" class="text-secondary mb-0"></p>
+                <div id="ai-result" class="ai-result"></div>
+              </div>
+            </div>
+            <div class="row row-cards tiles" id="in-tiles"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Спрос и покрытие</h3>
+                <div class="card-actions text-secondary">хватает ли сотрудников с нужными навыками</div>
+              </div>
+              <div class="card-body pb-0">
+                <div class="btn-group flex-wrap" id="in-fields" role="group" aria-label="Параметр заявки"></div>
+                <p class="text-secondary small mt-3">«Хватает ли сил» сравнивает долю этих заявок в потоке с долей сил сотрудников,
+                  которые могут их брать (по квалификации): «не хватает» — заявок в 1,5 раза больше, чем сил, они будут ждать;
+                  «некому брать» — по правилам не подходит ни один активный сотрудник. Наведите на метку — покажет расчёт.</p>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead><tr><th>Значение</th><th>Заявок</th><th>Ждут</th><th>Доработки</th><th>Могут брать</th><th>Доля сил</th><th>Хватает ли сил</th></tr></thead>
+                  <tbody id="in-options"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Правила, по которым заявки некому брать</h3></div>
+                  <div class="table-responsive">
+                    <table class="table table-vcenter card-table">
+                      <thead><tr><th>Правило</th><th>Заявок</th><th>Доля</th></tr></thead>
+                      <tbody id="in-blocked"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Почему заявки ждут сейчас</h3></div>
+                  <div class="table-responsive">
+                    <table class="table table-vcenter card-table">
+                      <thead><tr><th>Причина</th><th>Заявок</th></tr></thead>
+                      <tbody id="in-waiting"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
 
           <!-- Настройки → Параметры и правила -->
           <section id="tab-constructor" class="tab-page hidden">
@@ -451,7 +518,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Параметры заявки</h3>
-                <div class="card-actions"><button class="btn btn-sm" data-add-field="Order" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Параметр</button></div>
+                <div class="card-actions"><button class="btn btn-sm need-admin" data-add-field="Order" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Параметр</button></div>
               </div>
               <div class="table-responsive"><table class="table card-table table-vcenter">
                 <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
@@ -461,7 +528,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Параметры исполнителя</h3>
-                <div class="card-actions"><button class="btn btn-sm" data-add-field="Executor" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Параметр</button></div>
+                <div class="card-actions"><button class="btn btn-sm need-admin" data-add-field="Executor" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Параметр</button></div>
               </div>
               <div class="table-responsive"><table class="table card-table table-vcenter">
                 <thead><tr><th>Ключ</th><th>Название</th><th>Тип</th><th>Справочник</th><th>В правилах</th><th></th></tr></thead>
@@ -471,7 +538,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Правила подбора</h3>
-                <div class="card-actions"><button id="add-rule" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Правило</button></div>
+                <div class="card-actions"><button id="add-rule" class="btn btn-primary btn-sm need-admin" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Правило</button></div>
               </div>
               <div class="card-body pb-0">
                 <p class="text-secondary">Исполнитель подходит, если выполнены все включённые правила. Пустое значение не ограничивает
@@ -485,7 +552,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Вес заявки</h3>
-                <div class="card-actions"><button id="add-weight-rule" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Правило веса</button></div>
+                <div class="card-actions"><button id="add-weight-rule" class="btn btn-primary btn-sm need-admin" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Правило веса</button></div>
               </div>
               <div class="card-body pb-0"><p class="text-secondary" id="weight-hint"></p></div>
               <div class="table-responsive"><table class="table card-table table-vcenter">
@@ -550,7 +617,7 @@
               <div class="card-header"><h3 class="card-title">Настройки отдела</h3></div>
               <div class="card-body"><div id="motivation-fields" class="form-grid motivation-grid"></div></div>
               <div class="card-footer d-flex align-items-center gap-3">
-                <button id="motivation-save" class="btn btn-primary" type="submit"><svg class="icon"><use href="icons.svg#check"></use></svg>Сохранить</button>
+                <button id="motivation-save" class="btn btn-primary need-admin" type="submit"><svg class="icon"><use href="icons.svg#check"></use></svg>Сохранить</button>
                 <span id="motivation-error" class="text-danger"></span>
               </div>
             </form>
@@ -561,7 +628,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Отделы</h3>
-                <div class="card-actions"><button id="department-add" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Новый отдел</button></div>
+                <div class="card-actions"><button id="department-add" class="btn btn-primary btn-sm need-admin" type="button"><svg class="icon"><use href="icons.svg#plus"></use></svg>Новый отдел</button></div>
               </div>
               <div class="card-body pb-0">
                 <p class="text-secondary">Каждый отдел — отдельное пространство со своими параметрами, правилами, сотрудниками,
@@ -572,6 +639,40 @@
                 <thead><tr><th>Отдел</th><th>Сфера</th><th>На работе</th><th>Заявок в работе</th><th>Адрес для АИС</th><th></th></tr></thead>
                 <tbody id="departments"></tbody>
               </table></div>
+            </div>
+          </section>
+
+          <!-- Настройки → Пользователи -->
+          <section id="tab-users" class="tab-page hidden">
+            <p class="page-hint">Кто может входить в интерфейс и что ему доступно. Права проверяет сервер при каждом запросе;
+              блокировка, смена роли или пароля сразу закрывают открытые сессии пользователя. Все изменения — в журнале.</p>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Пользователи</h3>
+                <div class="card-actions"><button id="user-add" class="btn btn-primary btn-sm" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Новый пользователь</button></div>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead><tr><th>Логин</th><th>Имя</th><th>Роль</th><th>Отделы</th><th>Доступ</th><th>Последний вход</th><th></th></tr></thead>
+                  <tbody id="users"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Что может каждая роль</h3></div>
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table roles-table">
+                  <thead><tr><th>Что</th><th>Наблюдатель</th><th>Руководитель</th><th>Администратор</th></tr></thead>
+                  <tbody>
+                    <tr><td>Мониторинг, заявки, сотрудники, аналитика, разбор заявок, проверка заявки</td><td>смотрит</td><td>смотрит</td><td>смотрит</td></tr>
+                    <tr><td>Сотрудники: загрузка из файла, режим «больше нормы»</td><td>—</td><td>да</td><td>да</td></tr>
+                    <tr><td>Запуск ИИ-разбора, журнал отдела</td><td>—</td><td>да</td><td>да</td></tr>
+                    <tr><td>Параметры и правила, рейтинг и сверхнорма</td><td>смотрит</td><td>смотрит</td><td>меняет</td></tr>
+                    <tr><td>Отделы, пользователи, входы в журнале, тестовый стенд</td><td>—</td><td>—</td><td>да</td></tr>
+                    <tr><td>Какие отделы видит</td><td colspan="2">отмеченные у пользователя (ничего не отмечено — все)</td><td>все</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
 
@@ -594,6 +695,9 @@
 
         </div>
       </div>
+      <footer class="app-footer container-xl">
+        <span>Executor Balancer — распределение заявок между сотрудниками в реальном времени</span>
+      </footer>
     </div>
   </div>
 
@@ -619,6 +723,7 @@
     </form>
   </dialog>
 
+  <button id="scroll-top" class="btn btn-primary btn-icon scroll-top" type="button" aria-label="Наверх" title="Наверх"><svg class="icon"><use href="icons.svg#arrow-up"></use></svg></button>
   <div id="toast" class="toast-box hidden" role="status"></div>
 </body>
 </html>

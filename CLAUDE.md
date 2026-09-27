@@ -24,9 +24,9 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 Всё делится на отделы (`Department`, `DepartmentId` у настроек, исполнителей, заявок, статистики): отдел выбирается
 в шапке (`department.js`), `api.js` сам добавляет `?department=` к `/api/dashboard` и `/api/admin`, на сервере —
 `DepartmentScope` + фильтр `RequireDepartment`. Любой новый запрос к данным — с фильтром по отделу.
-`wwwroot/js`: `main.js` — вкладки; по файлу на вкладку (`overview.js` — Мониторинг, `executors.js`, `analytics.js`,
+`wwwroot/js`: `main.js` — разделы меню (`GROUPS`) и вкладки; по файлу на вкладку (`overview.js` — Мониторинг, `executors.js`, `analytics.js`,
 `constructor.js`, `preview.js`, `import.js` (сотрудники из CSV, сервер — `ExecutorImportService`), `departments.js` + `sphere.js` (мастер своей сферы, сервер — `SphereBuilder`), `profile.js`
-(страница сотрудника `#executor-ID`), `audit.js`, `demo.js` — Тестовый стенд, `start.js` — «Как это работает», `orders.js` — Заявки); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
+(страница сотрудника `#executor-ID`), `audit.js`, `insights.js` — Разбор заявок (спрос и покрытие — `Application/Insights/DemandAnalyzer.cs`, ИИ — `AiAnalyst.cs` + `Infrastructure/Ai`), `demo.js` — Тестовый стенд, `start.js` — «Как это работает», `orders.js` — Заявки, `users.js` — Пользователи); общие — `session.js` (роль: `can('Manager')`), `api.js`, `dom.js`, `forms.js` (форма по справочнику),
 `editor.js` (диалог), `charts.js`, `explain.js`, `presets.js`. Пульт демонстрации — `Endpoints/DemoEndpoints.cs`
 (прокси к эмулятору), генератор и симуляция — `src/AisEmulator.Api/Simulation`, шаблоны сфер —
 `Application/Configuration/DomainPresets.cs`.
@@ -37,6 +37,9 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
   только через `textContent`; строгая CSP (никаких inline-скриптов/стилей и CDN; сторонние файлы — только в `wwwroot/vendor` с лицензией
   и записью в `THIRD_PARTY_NOTICES.md`; оформление — классы Tabler, иконки — `icon()` из `dom.js` и `icons.svg`); изменяющие запросы
   администратора — с заголовком `X-Requested-With: executor-balancer`; секреты только из окружения.
+- Роли: наблюдатель / руководитель / администратор (`UserRole`). Новый изменяющий адрес — с
+  `.RequireAuthorization(Policies.Manager|Admin)`; доступ к отделу проверяет `DepartmentScope.RequireDepartment`;
+  кнопки в интерфейсе — через `can()` или классы `need-manager` / `need-admin`. Автор в журнале — `ICurrentActor`.
 - Любое изменение Lua-скрипта — повторить в `tests/ExecutorBalancer.Tests/InMemoryLoadStore.cs`
   и прогнать `scripts/check_lua.py`.
 - Решение, объяснение, outbox и сводные метрики пишутся в одной транзакции.

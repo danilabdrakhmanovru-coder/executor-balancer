@@ -29,6 +29,10 @@ public static class IntegrationEndpoints
             ReceiveOrder(Department.DefaultId, request, balancer, ct));
         group.MapPost("/orders/{id:long}/status", ChangeStatus);
         group.MapGet("/orders/{id:long}/assignment", GetAssignment);
+        // последний известный номер заявки: АИС, потерявшая счётчик (например, эмулятор после перезапуска),
+        // продолжает нумерацию с него, а не с 1 — иначе новые заявки выглядели бы повторами старых
+        group.MapGet("/orders/last-id", async (IBalancerDbContext db, CancellationToken ct) =>
+            Results.Ok(new { lastId = await db.Orders.AsNoTracking().MaxAsync(o => (long?)o.Id, ct) ?? 0 }));
         group.MapPut("/executors/{id:long}",
             (long id, ExecutorRequest request, OrderBalancer balancer, CancellationToken ct) =>
                 UpsertExecutor(Department.DefaultId, id, request, balancer, ct));

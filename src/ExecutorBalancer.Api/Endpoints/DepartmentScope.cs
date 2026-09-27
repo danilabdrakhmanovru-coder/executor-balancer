@@ -1,4 +1,5 @@
 using System.Globalization;
+using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Domain;
 
@@ -26,7 +27,10 @@ public readonly record struct DepartmentScope(int Id)
                 : null);
     }
 
-    /// <summary>Фильтр группы: если у обработчика есть параметр отдела, отдел должен существовать.</summary>
+    /// <summary>
+    /// Фильтр группы: если у обработчика есть параметр отдела, отдел должен существовать и быть доступен пользователю.
+    /// Чужой отдел выглядит как несуществующий (404) — список отделов не подбирается перебором.
+    /// </summary>
     public static async ValueTask<object?> RequireDepartment(EndpointFilterInvocationContext context,
         EndpointFilterDelegate next)
     {
@@ -35,7 +39,8 @@ public readonly record struct DepartmentScope(int Id)
             if (argument is DepartmentScope scope)
             {
                 var departments = context.HttpContext.RequestServices.GetRequiredService<DepartmentService>();
-                if (!await departments.ExistsAsync(scope.Id, context.HttpContext.RequestAborted))
+                if (!context.HttpContext.User.Access().CanSee(scope.Id)
+                    || !await departments.ExistsAsync(scope.Id, context.HttpContext.RequestAborted))
                 {
                     return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Отдел не найден");
                 }

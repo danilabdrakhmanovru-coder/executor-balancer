@@ -4,6 +4,7 @@ import { $, el, row, badge, button, fmt, fmtTime, deviation, emptyRow, tile, toa
 import { columns } from './charts.js';
 import { KIND, renderExplanation } from './explain.js';
 import { showCheck } from './preview.js';
+import { can } from './session.js';
 
 let lastFeedId = 0;
 let liveLoadedAt = 0;
@@ -33,10 +34,12 @@ function noExecutorsRow() {
     }, 'btn btn-sm btn-primary', 'users');
     bar.append(seed);
   }
-  const file = el('a', null, 'btn btn-sm');
-  file.href = '#executors';
-  file.append('Загрузить из файла');
-  bar.append(file);
+  if (can('Manager')) {
+    const file = el('a', null, 'btn btn-sm');
+    file.href = '#executors';
+    file.append('Загрузить из файла');
+    bar.append(file);
+  }
   tr.firstChild.append(bar);
   return tr;
 }

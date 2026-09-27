@@ -25,6 +25,9 @@ public static class DashboardEndpoints
         group.MapGet("/executors/{id:long}", ExecutorPage);
         group.MapGet("/live", (DepartmentScope d, AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(d.Id, ct));
         group.MapGet("/analytics", Analytics);
+        // спрос и покрытие за сутки — факты без ИИ, на них же опирается ИИ-разбор
+        group.MapGet("/demand", (DepartmentScope d, Application.Insights.DemandAnalyzer demand, CancellationToken ct) =>
+            demand.BuildAsync(d.Id, ct));
         group.MapGet("/export.csv", Export);
         return app;
     }
@@ -150,7 +153,7 @@ public static class DashboardEndpoints
                     Skills = snapshot.Catalog.All
                         .Where(f => f.Owner == FieldOwner.Executor && e.Values.ContainsKey(f.Key))
                         .OrderBy(f => f.Id)
-                        .Select(f => new { f.Key, f.Label, Value = Display(e.Values[f.Key]) })
+                        .Select(f => new { f.Key, f.Label, Value = FieldText.Show(f, e.Values[f.Key]) })
                         .ToList(),
                 };
             })
@@ -208,12 +211,6 @@ public static class DashboardEndpoints
         }));
     }
 
-    private static string Display(FieldValue value) => value.IsArray
-        ? string.Join(", ", value.Items)
-        : value.Type == FieldType.Number
-            ? value.Number.ToString("#,0.##", CultureInfo.GetCultureInfo("ru-RU"))
-            : value.Type == FieldType.Boolean ? (value.Flag ? "да" : "нет") : value.Text;
-
     /// <summary>Коротко, что за заявка: первые три параметра из справочника в порядке их заведения.</summary>
     private static string OrderSummary(BalancerSnapshot snapshot, string? json)
     {
@@ -227,7 +224,7 @@ public static class DashboardEndpoints
             .Where(f => f.Owner == FieldOwner.Order && values.ContainsKey(f.Key))
             .OrderBy(f => f.Id)
             .Take(3)
-            .Select(f => Display(values[f.Key])));
+            .Select(f => FieldText.Show(f, values[f.Key])));
     }
 
     /// <summary>
@@ -263,7 +260,7 @@ public static class DashboardEndpoints
                 f.Label,
                 Type = f.Type.ToString(),
                 Values = e.Values.TryGetValue(f.Key, out var v)
-                    ? (v.IsArray ? v.Items.ToArray() : [Display(v)])
+                    ? (v.IsArray ? FieldText.Items(f, v).ToArray() : [FieldText.Show(f, v)])
                     : [],
                 Rules = rules.Where(r => r.ExecutorField?.Key == f.Key || r.ExecutorFieldUpper?.Key == f.Key)
                     .Select(r => r.Name).Distinct().ToArray(),
@@ -434,7 +431,7 @@ public static class DashboardEndpoints
         var parameters = snapshot.Catalog.All
             .Where(f => f.Owner == FieldOwner.Order && values.ContainsKey(f.Key))
             .OrderBy(f => f.Id)
-            .Select(f => new { f.Label, Value = Display(values[f.Key]) })
+            .Select(f => new { f.Label, Value = FieldText.Show(f, values[f.Key]) })
             .ToList();
 
         var events = new List<TimelineEvent>
