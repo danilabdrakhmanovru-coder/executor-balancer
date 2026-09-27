@@ -63,7 +63,9 @@ export function tile(label, value, hint, warn, iconName) {
     body.append(badgeIcon);
   }
   const text = el('div');
-  text.append(el('div', label, 'subheader'), el('div', value, 'tile-value'));
+  const valueBox = el('div', null, 'tile-value');
+  if (value instanceof Node) valueBox.append(value); else valueBox.textContent = String(value ?? '—');
+  text.append(el('div', label, 'subheader'), valueBox);
   if (hint) text.append(el('div', hint, 'tile-hint'));
   body.append(text);
   card.append(body);

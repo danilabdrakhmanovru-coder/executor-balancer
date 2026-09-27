@@ -84,6 +84,18 @@ public sealed class AisStore
         }
     }
 
+    /// <summary>
+    /// Номера заявок не повторяются: эмулятор держит их в памяти и после перезапуска начал бы с 1,
+    /// а балансировщик принял бы новые заявки за повторы старых. Пульт сообщает, с какого номера продолжать.
+    /// </summary>
+    public void ContinueOrderIdsFrom(long next)
+    {
+        lock (_gate)
+        {
+            _nextOrderId = Math.Max(_nextOrderId, next - 1);
+        }
+    }
+
     public AisOrder CreateOrder(string? department, long? parentId, Dictionary<string, JsonElement> attributes)
     {
         lock (_gate)

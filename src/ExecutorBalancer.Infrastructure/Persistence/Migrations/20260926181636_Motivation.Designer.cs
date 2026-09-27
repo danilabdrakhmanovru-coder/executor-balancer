@@ -3,6 +3,7 @@ using System;
 using ExecutorBalancer.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ExecutorBalancer.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(BalancerDbContext))]
-    partial class BalancerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260926181636_Motivation")]
+    partial class Motivation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -173,10 +176,6 @@ namespace ExecutorBalancer.Infrastructure.Persistence.Migrations
                     b.Property<decimal>("ReworkPenalty")
                         .HasPrecision(4, 3)
                         .HasColumnType("numeric(4,3)");
-
-                    b.Property<string>("SphereTitle")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
 
                     b.HasKey("Id");
 

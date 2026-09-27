@@ -19,4 +19,10 @@ public class Order
     public DateTimeOffset ReceivedAt { get; set; }
     public DateTimeOffset? AssignedAt { get; set; }
     public DateTimeOffset? ClosedAt { get; set; }
+
+    /// <summary>Сколько раз заявка уходила на доработку у текущего исполнителя — снижает балл за неё.</summary>
+    public int ReworkCount { get; set; }
+
+    /// <summary>Балл за закрытую заявку: вес × коэффициент качества. null — ещё не закрыта.</summary>
+    public decimal? Points { get; set; }
 }

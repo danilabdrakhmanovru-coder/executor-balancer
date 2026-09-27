@@ -5,6 +5,7 @@ import { $, el, input, field, toast, fmt, badge, icon } from './dom.js';
 import { attributeForm } from './forms.js';
 import { renderExplanation, KIND } from './explain.js';
 import { openOrder } from './overview.js';
+import { showCheck } from './preview.js';
 
 let config = null;
 let orderForm = null;
@@ -114,7 +115,9 @@ async function sendOrder() {
       const details = await api(`/api/dashboard/orders/${order.id}`).catch(() => null);
       const current = details?.history?.find((h) => h.isCurrent);
       if (current?.explanation) {
-        result.replaceChildren(el('h3', `Заявка #${order.id}`), renderExplanation(current.explanation));
+        result.replaceChildren(el('h3', `Заявка #${order.id}`), renderExplanation(current.explanation, {
+          onCandidate: (c) => showCheck(c, details.attributes || {}),
+        }));
         return;
       }
       if (details?.pendingReason && i > 3) {

@@ -2,19 +2,18 @@ using System.Text.Json;
 
 namespace AisEmulator.Api.Simulation;
 
-/// <param name="RatePerHour">Сколько заявок в час создают «клиенты».</param>
-/// <param name="WorkPerSecond">Доля назначенных заявок, которые исполнители обрабатывают за секунду.</param>
-/// <param name="ParentProbability">Доля заявок, связанных с недавней заявкой (parent_id).</param>
 /// <param name="Department">Код отдела балансировщика; null — основной отдел.</param>
 /// <param name="RatePerHour">Сколько заявок в час создают «клиенты».</param>
-/// <param name="WorkPerSecond">Доля назначенных заявок, которые исполнители обрабатывают за секунду.</param>
+/// <param name="HastyShare">Доля «торопливых» сотрудников: закрывают за секунды и чаще отправляют на доработку —
+/// на них видно, как рейтинг и защита от работы на количество реагируют на качество.</param>
 /// <param name="ParentProbability">Доля заявок, связанных с недавней заявкой (parent_id).</param>
 public sealed record SimulationRequest(
     double RatePerHour,
     ValueSpec[] OrderFields,
     string? Department = null,
-    double WorkPerSecond = 0.15,
-    double ParentProbability = 0.08)
+    double HastyShare = 0.15,
+    double ParentProbability = 0.08,
+    long? NextOrderId = null)
 {
     public const double MaxRatePerHour = 72_000;
 
@@ -30,7 +29,12 @@ public sealed record SimulationRequest(
             return $"скорость — от 1 до {MaxRatePerHour} заявок в час";
         }
 
-        if (WorkPerSecond is < 0 or > 1 || ParentProbability is < 0 or > 1)
+        if (NextOrderId is < 1)
+        {
+            return "номер следующей заявки должен быть положительным";
+        }
+
+        if (HastyShare is < 0 or > 1 || ParentProbability is < 0 or > 1)
         {
             return "доли — от 0 до 1";
         }
@@ -78,6 +82,9 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
         public double Due { get; set; }
         public DateTimeOffset LastWork { get; set; } = DateTimeOffset.MinValue;
         public Dictionary<long, DateTimeOffset> Rework { get; } = new();
+
+        /// <summary>Когда сотрудник закончит заявку: за кем она и к какому моменту.</summary>
+        public Dictionary<long, (long Executor, DateTimeOffset Due)> Handling { get; } = new();
         public List<long> Recent { get; } = new();
         public long Created, Accepted, Rejected, ToRework, Returned;
     }
@@ -194,18 +201,46 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
         Interlocked.Increment(ref flow.Created);
     }
 
-    /// <summary>Исполнители работают: назначение уже записано в АИС — заявку можно решить.</summary>
+    /// <summary>
+    /// «Торопливый» сотрудник — детерминированно по номеру, чтобы на демонстрации это были одни и те же люди.
+    /// Поведение сотрудников — только имитация; балансировщик о нём не знает и видит лишь сроки и статусы.
+    /// </summary>
+    public static bool IsHasty(long executorId, double share) => (ulong)executorId * 2654435761UL % 100 < share * 100;
+
+    /// <summary>
+    /// Исполнители работают: заявка, назначение которой уже записано в АИС, решается через время обработки.
+    /// Обычный сотрудник тратит 25–90 с и редко отправляет на доработку; торопливый — 2–10 с и чаще.
+    /// </summary>
     private void Work(Flow flow, SimulationRequest settings, DateTimeOffset now)
     {
-        foreach (var order in store.Orders("processed", assigned: true, limit: 1000, department: flow.Department ?? AisStore.NoDepartment))
+        var inWork = new HashSet<long>();
+        foreach (var order in store.Orders("processed", assigned: true, limit: 2000, department: flow.Department ?? AisStore.NoDepartment))
         {
-            if (flow.Rework.ContainsKey(order.Id) || _random.NextDouble() >= settings.WorkPerSecond)
+            var executor = order.ExecutorId!.Value;
+            if (flow.Rework.ContainsKey(order.Id))
             {
                 continue;
             }
 
+            inWork.Add(order.Id);
+            var hasty = IsHasty(executor, settings.HastyShare);
+            if (!flow.Handling.TryGetValue(order.Id, out var plan) || plan.Executor != executor)
+            {
+                var seconds = hasty ? 2 + _random.NextDouble() * 8 : 25 + _random.NextDouble() * 65;
+                flow.Handling[order.Id] = (executor, now + TimeSpan.FromSeconds(seconds));
+                continue;
+            }
+
+            if (plan.Due > now)
+            {
+                continue;
+            }
+
+            flow.Handling.Remove(order.Id);
+            inWork.Remove(order.Id);
             var roll = _random.NextDouble();
-            var status = roll < 0.65 ? "accept" : roll < 0.75 ? "reject" : "await";
+            var rework = hasty ? 0.4 : 0.12;
+            var status = roll < rework ? "await" : roll < rework + 0.12 ? "reject" : "accept";
             commands.SetStatus(order.Id, status);
             switch (status)
             {
@@ -216,6 +251,12 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
                     flow.Rework[order.Id] = now + TimeSpan.FromSeconds(5 + _random.NextDouble() * 15);
                     break;
             }
+        }
+
+        // заявки, которые ушли из работы помимо симуляции (перераспределены, закрыты вручную), больше не ждём
+        foreach (var id in flow.Handling.Keys.Where(id => !inWork.Contains(id)).ToList())
+        {
+            flow.Handling.Remove(id);
         }
 
         // клиент дописал заявку — она возвращается в рассмотрение

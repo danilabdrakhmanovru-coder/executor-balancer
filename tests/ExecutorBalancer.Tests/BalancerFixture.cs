@@ -84,6 +84,9 @@ internal sealed class BalancerFixture : IAsyncDisposable
             .BuildAsync(department, period, CancellationToken.None);
     }
 
+    /// <summary>Общий (singleton) сервис — например, кэш качества.</summary>
+    public T Shared<T>() where T : notnull => _services.GetRequiredService<T>();
+
     public async Task<T> Query<T>(Func<IBalancerDbContext, Task<T>> action)
     {
         await using var scope = _services.CreateAsyncScope();

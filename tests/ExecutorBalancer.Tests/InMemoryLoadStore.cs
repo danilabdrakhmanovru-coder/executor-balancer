@@ -13,7 +13,7 @@ internal sealed class InMemoryLoadStore : ILoadStore
     private readonly Dictionary<long, int> _openCount = new();
     private readonly Dictionary<(DateOnly Day, long Executor), int> _daily = new();
     private readonly Dictionary<long, bool> _active = new();
-    private readonly Dictionary<long, (long Executor, long Weight, string State, DateOnly Day, DateTimeOffset At)> _orders = new();
+    private readonly Dictionary<long, (long Executor, long Weight, string State, DateOnly Day, DateTimeOffset At, bool Counted)> _orders = new();
     private long _version;
 
     public Task<PickResult> PickAsync(PickRequest request, CancellationToken cancellationToken)
@@ -26,9 +26,8 @@ internal sealed class InMemoryLoadStore : ILoadStore
             }
 
             var report = new List<SlotReport>();
-            CandidateSlot? best = null;
-            long bestLoad = 0;
-            int bestDaily = 0;
+            // ярус 0 — норма не набрана, ярус 1 — сверх нормы (только если в ярусе 0 никого)
+            var best = new (CandidateSlot Slot, long Load, int Daily)?[2];
             foreach (var slot in request.Candidates)
             {
                 var load = _openWeight.GetValueOrDefault(slot.ExecutorId);
@@ -39,34 +38,38 @@ internal sealed class InMemoryLoadStore : ILoadStore
                     continue;
                 }
 
-                if (slot.DailyLimit is { } limit && daily >= limit)
+                if (slot.DailyLimit is not null && daily >= slot.Cap)
                 {
                     report.Add(new SlotReport(slot.ExecutorId, "daily_limit_exceeded", load, daily));
                     continue;
                 }
 
-                report.Add(new SlotReport(slot.ExecutorId, "eligible", load, daily));
-                if (best is null || LoadMath.IsBetter(request.WeightMilli,
+                var tier = slot.DailyLimit is { } limit && daily >= limit ? 1 : 0;
+                report.Add(new SlotReport(slot.ExecutorId, tier == 0 ? "eligible" : "over_norm", load, daily));
+                if (best[tier] is not { } b || LoadMath.IsBetter(request.WeightMilli,
                         load, slot.QualificationMilli, daily, slot.ExecutorId,
-                        bestLoad, best.QualificationMilli, bestDaily, best.ExecutorId))
+                        b.Load, b.Slot.QualificationMilli, b.Daily, b.Slot.ExecutorId))
                 {
-                    best = slot;
-                    bestLoad = load;
-                    bestDaily = daily;
+                    best[tier] = (slot, load, daily);
                 }
             }
 
-            if (best is null)
+            if ((best[0] ?? best[1]) is not { } winner)
             {
                 return Task.FromResult(new PickResult(PickStatus.NoCandidate, null, report));
             }
 
-            var id = best.ExecutorId;
+            var (bestSlot, bestLoad, bestDaily) = winner;
+            var id = bestSlot.ExecutorId;
             _openWeight[id] = bestLoad + request.WeightMilli;
             _openCount[id] = _openCount.GetValueOrDefault(id) + 1;
-            _daily[(request.Day, id)] = bestDaily + 1;
+            if (request.CountsTowardDaily)
+            {
+                _daily[(request.Day, id)] = bestDaily + 1;
+            }
+
             var now = DateTimeOffset.UtcNow;
-            _orders[request.OrderId] = (id, request.WeightMilli, "open", request.Day, now);
+            _orders[request.OrderId] = (id, request.WeightMilli, "open", request.Day, now, request.CountsTowardDaily);
             return Task.FromResult(new PickResult(PickStatus.Assigned, id, report, now));
         }
     }
@@ -85,7 +88,7 @@ internal sealed class InMemoryLoadStore : ILoadStore
             if (release == LoadRelease.Rollback)
             {
                 var key = (order.Day, order.Executor);
-                if (_daily.GetValueOrDefault(key) > 0)
+                if (order.Counted && _daily.GetValueOrDefault(key) > 0)
                 {
                     _daily[key] -= 1;
                 }

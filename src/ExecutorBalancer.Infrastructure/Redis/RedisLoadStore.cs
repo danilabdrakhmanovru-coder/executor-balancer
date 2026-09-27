@@ -15,7 +15,11 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
     private const int ClosedOrderTtlSeconds = 7 * 24 * 3600;
 
     // KEYS: 1 open-weight, 2 open-count, 3 daily, 4 active, 5 order
-    // ARGV: 1 вес заявки, 2 reopen, 3 ttl дневного счётчика, далее тройки: id, квалификация, лимит (-1 — нет)
+    // ARGV: 1 вес заявки, 2 reopen, 3 ttl дневного счётчика, 4 считать ли в суточную норму (1/0;
+    //       0 — та же заявка вернулась к тому же исполнителю после доработки), далее четвёрки:
+    //       id, квалификация, норма (суточный лимит, -1 — нет), потолок с режимом «больше нормы» (не меньше нормы)
+    // Сначала выбираем среди тех, кто не набрал норму; сверх нормы (до потолка) — только если таких нет:
+    // добровольцы получают излишки и не забирают заявки у коллег.
     // Ответ: статус, исполнитель, с какого момента заявка за ним (unix-секунды), далее строки отчёта.
     private const string PickScript = """
         local state = redis.call('HGET', KEYS[5], 'state')
@@ -24,51 +28,65 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
           return {'existing', held[1] or '', held[2] or ''}
         end
         local w = tonumber(ARGV[1])
-        local best, bestLoad, bestQ, bestDaily
+        local best = {}
         local report = {}
-        for i = 4, #ARGV, 3 do
+        local function consider(tier, id, load, q, daily)
+          local b = best[tier]
+          local better = false
+          if b == nil then
+            better = true
+          else
+            local lhs = (load + w) * b.q
+            local rhs = (b.load + w) * q
+            if lhs < rhs then
+              better = true
+            elseif lhs == rhs then
+              local dl = daily * b.q
+              local dr = b.daily * q
+              better = dl < dr or (dl == dr and tonumber(id) < tonumber(b.id))
+            end
+          end
+          if better then
+            best[tier] = {id = id, load = load, q = q, daily = daily}
+          end
+        end
+        for i = 5, #ARGV, 4 do
           local id = ARGV[i]
           local q = tonumber(ARGV[i + 1])
           local limit = tonumber(ARGV[i + 2])
+          local cap = tonumber(ARGV[i + 3])
           local daily = tonumber(redis.call('HGET', KEYS[3], id) or '0')
           local load = tonumber(redis.call('HGET', KEYS[1], id) or '0')
           if redis.call('HGET', KEYS[4], id) ~= '1' then
             report[#report + 1] = id .. '|inactive|' .. load .. '|' .. daily
-          elseif limit >= 0 and daily >= limit then
+          elseif limit >= 0 and daily >= cap then
             report[#report + 1] = id .. '|daily_limit_exceeded|' .. load .. '|' .. daily
+          elseif limit >= 0 and daily >= limit then
+            report[#report + 1] = id .. '|over_norm|' .. load .. '|' .. daily
+            consider(2, id, load, q, daily)
           else
             report[#report + 1] = id .. '|eligible|' .. load .. '|' .. daily
-            local better = false
-            if best == nil then
-              better = true
-            else
-              local lhs = (load + w) * bestQ
-              local rhs = (bestLoad + w) * q
-              if lhs < rhs then
-                better = true
-              elseif lhs == rhs then
-                local dl = daily * bestQ
-                local dr = bestDaily * q
-                better = dl < dr or (dl == dr and tonumber(id) < tonumber(best))
-              end
-            end
-            if better then
-              best, bestLoad, bestQ, bestDaily = id, load, q, daily
-            end
+            consider(1, id, load, q, daily)
           end
         end
-        if best == nil then
+        local chosen = best[1] or best[2]
+        if chosen == nil then
           return {'none', '', '', unpack(report)}
         end
+        local winner = chosen.id
         local now = redis.call('TIME')[1]
-        redis.call('HINCRBY', KEYS[1], best, w)
-        redis.call('HINCRBY', KEYS[2], best, 1)
-        redis.call('HINCRBY', KEYS[3], best, 1)
-        redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
-        -- day: какой суточный счётчик увеличен — откат должен вернуть именно его
-        redis.call('HSET', KEYS[5], 'executor', best, 'weight', w, 'state', 'open', 'at', now, 'day', KEYS[3])
+        redis.call('HINCRBY', KEYS[1], winner, w)
+        redis.call('HINCRBY', KEYS[2], winner, 1)
+        local day = ''
+        if ARGV[4] == '1' then
+          redis.call('HINCRBY', KEYS[3], winner, 1)
+          redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
+          day = KEYS[3]
+        end
+        -- day: какой суточный счётчик увеличен (пусто — никакой) — откат должен вернуть именно его
+        redis.call('HSET', KEYS[5], 'executor', winner, 'weight', w, 'state', 'open', 'at', now, 'day', day)
         redis.call('PERSIST', KEYS[5])
-        return {'assigned', best, now, unpack(report)}
+        return {'assigned', winner, now, unpack(report)}
         """;
 
     // KEYS: 1 open-weight, 2 open-count, 3 order. ARGV: 1 новое состояние, 2 ttl, 3 удалить ключ (1/0)
@@ -85,7 +103,7 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
           -- откат: решение не сохранено, поэтому место в суточном лимите тоже возвращается.
           -- Ключ счётчика записан в самой заявке; у всех ключей общий hash tag {eb}, слот тот же
           local day = redis.call('HGET', KEYS[3], 'day')
-          if day and tonumber(redis.call('HGET', day, executor) or '0') > 0 then
+          if day and day ~= '' and tonumber(redis.call('HGET', day, executor) or '0') > 0 then
             redis.call('HINCRBY', day, executor, -1)
           end
           redis.call('DEL', KEYS[3])
@@ -102,17 +120,19 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
 
     public async Task<PickResult> PickAsync(PickRequest request, CancellationToken cancellationToken)
     {
-        var args = new List<RedisValue>(3 + request.Candidates.Count * 3)
+        var args = new List<RedisValue>(4 + request.Candidates.Count * 4)
         {
             request.WeightMilli,
             request.Reopen ? 1 : 0,
             DailyTtlSeconds,
+            request.CountsTowardDaily ? 1 : 0,
         };
         foreach (var candidate in request.Candidates)
         {
             args.Add(candidate.ExecutorId);
             args.Add(candidate.QualificationMilli);
             args.Add(candidate.DailyLimit ?? -1);
+            args.Add(candidate.Cap);
         }
 
         RedisKey[] keys =

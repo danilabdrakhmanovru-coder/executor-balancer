@@ -8,7 +8,8 @@ using Microsoft.Extensions.Logging;
 
 namespace ExecutorBalancer.Application.Configuration;
 
-public sealed record DepartmentInput(string? Name, string? Code, string? PresetId);
+/// <param name="Sphere">Своя сфера из мастера — вместо шаблона.</param>
+public sealed record DepartmentInput(string? Name, string? Code, string? PresetId, SphereInput? Sphere = null);
 
 public sealed record DepartmentView(int Id, string Code, string Name, string? PresetId, string? PresetTitle,
     int Executors, int ActiveExecutors, int OpenOrders, DateTimeOffset CreatedAt);
@@ -54,7 +55,7 @@ public sealed partial class DepartmentService(
         return departments.Select(d =>
         {
             executors.TryGetValue(d.Id, out var e);
-            return new DepartmentView(d.Id, d.Code, d.Name, d.PresetId, DomainPresets.Find(d.PresetId)?.Title,
+            return new DepartmentView(d.Id, d.Code, d.Name, d.PresetId, DomainPresets.Find(d.PresetId)?.Title ?? d.SphereTitle,
                 e?.Total ?? 0, e?.Active ?? 0, open.GetValueOrDefault(d.Id), d.CreatedAt);
         }).ToList();
     }
@@ -76,6 +77,11 @@ public sealed partial class DepartmentService(
         if (!string.IsNullOrWhiteSpace(input.PresetId) && (preset = DomainPresets.Find(input.PresetId)) is null)
         {
             errors["presetId"] = ["неизвестный шаблон"];
+        }
+
+        if (preset is not null && input.Sphere is not null)
+        {
+            errors["sphere"] = ["либо шаблон, либо своя сфера"];
         }
 
         var code = input.Code?.Trim().ToLowerInvariant();
@@ -113,7 +119,12 @@ public sealed partial class DepartmentService(
         }
 
         var now = clock.GetUtcNow();
-        var department = new Department { Code = code, Name = name, PresetId = preset?.Id, CreatedAt = now };
+        // своя сфера проверяется целиком до того, как что-либо записано
+        var sphere = input.Sphere is { } custom ? SphereBuilder.Build(custom, 0, now) : null;
+        var department = new Department
+        {
+            Code = code, Name = name, PresetId = preset?.Id, SphereTitle = sphere?.Title, CreatedAt = now,
+        };
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             db.Departments.Add(department);
@@ -132,6 +143,15 @@ public sealed partial class DepartmentService(
                 db.FieldDefinitions.AddRange(fields);
                 db.Rules.AddRange(rules);
                 db.WeightRules.AddRange(weightRules);
+            }
+            else if (sphere is not null)
+            {
+                sphere.Fields.ForEach(f => f.DepartmentId = department.Id);
+                sphere.Rules.ForEach(r => r.DepartmentId = department.Id);
+                sphere.WeightRules.ForEach(w => w.DepartmentId = department.Id);
+                db.FieldDefinitions.AddRange(sphere.Fields);
+                db.Rules.AddRange(sphere.Rules);
+                db.WeightRules.AddRange(sphere.WeightRules);
             }
 
             Audit("department_created", department.Id, null, Snapshot(department));
@@ -233,7 +253,7 @@ public sealed partial class DepartmentService(
         directory.Invalidate();
     }
 
-    private static object Snapshot(Department d) => new { d.Code, d.Name, Preset = DomainPresets.Find(d.PresetId)?.Title };
+    private static object Snapshot(Department d) => new { d.Code, d.Name, Preset = DomainPresets.Find(d.PresetId)?.Title ?? d.SphereTitle };
 
     private static string Name(string? value, Dictionary<string, string[]> errors)
     {

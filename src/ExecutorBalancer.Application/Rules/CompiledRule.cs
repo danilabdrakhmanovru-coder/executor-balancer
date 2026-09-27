@@ -72,6 +72,46 @@ public sealed class CompiledRule
         return Evaluate(left!, right, upper) ? RuleOutcome.Pass : RuleOutcome.Fail(Describe(left!, right, upper));
     }
 
+    /// <summary>
+    /// Подробный разбор для человека: что у заявки, что требуется от исполнителя, что у него есть и выполнено ли.
+    /// Та же логика, что в <see cref="Check"/>, — результат всегда совпадает.
+    /// </summary>
+    public RuleExplanation Explain(IReadOnlyDictionary<string, FieldValue> order,
+        IReadOnlyDictionary<string, FieldValue> executor)
+    {
+        order.TryGetValue(OrderField.Key, out var left);
+        FieldValue? right;
+        FieldValue? upper = null;
+        string? source = null;
+        if (Target == RuleTarget.Constant)
+        {
+            right = Constant;
+            upper = ConstantUpper;
+        }
+        else
+        {
+            executor.TryGetValue(ExecutorField!.Key, out right);
+            source = ExecutorField.Label;
+            if (ExecutorFieldUpper is not null)
+            {
+                executor.TryGetValue(ExecutorFieldUpper.Key, out upper);
+                source = $"{ExecutorField.Label} — {ExecutorFieldUpper.Label}";
+            }
+        }
+
+        var expected = Operator == RuleOperator.Between
+            ? $"от {right?.ToString() ?? "−∞"} до {upper?.ToString() ?? "+∞"}"
+            : right?.ToString();
+        var outcome = Check(order, executor);
+        var missing = left is null || (Operator == RuleOperator.Between ? right is null && upper is null : right is null);
+        var note = !missing ? null
+            : IsStrict ? "значение не заполнено, а правило строгое"
+            : left is null ? "у заявки значение не указано — правило не ограничивает"
+            : "у исполнителя значение не указано — правило не ограничивает";
+        return new RuleExplanation(Name, OrderField.Label, left?.ToString(), OperatorText(Operator), source, expected,
+            outcome.Passed, note, IsStrict);
+    }
+
     /// <summary>Проверка условия только по заявке (для правил веса). Пустое значение — условие не выполнено.</summary>
     public bool Matches(IReadOnlyDictionary<string, FieldValue> order) =>
         order.TryGetValue(OrderField.Key, out var left) && Evaluate(left, Constant, ConstantUpper);
@@ -120,3 +160,9 @@ public sealed class CompiledRule
 }
 
 public sealed record CompiledWeightRule(CompiledRule Condition, decimal Weight);
+
+/// <param name="OrderValue">Значение у заявки; null — не указано.</param>
+/// <param name="Source">Откуда берётся требование: параметр исполнителя или null для константы.</param>
+/// <param name="Expected">Значение у исполнителя (или константа); null — не указано.</param>
+public sealed record RuleExplanation(string Rule, string OrderField, string? OrderValue, string Operator, string? Source,
+    string? Expected, bool Passed, string? Note, bool IsStrict);

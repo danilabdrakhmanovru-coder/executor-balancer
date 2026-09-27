@@ -29,3 +29,18 @@ public sealed class AssignmentExplanation
     public static AssignmentExplanation? FromJson(string json) =>
         JsonSerializer.Deserialize<AssignmentExplanation>(json, Json);
 }
+
+/// <summary>Разбор «почему этому сотруднику подходит заявка»: правила по отдельности, норма, нагрузка.</summary>
+/// <param name="Score">Оценка, если бы заявка ушла ему: (вес в работе + вес заявки) / квалификация.</param>
+public sealed record ExecutorCheck(
+    long ExecutorId,
+    string Name,
+    bool IsActive,
+    bool CanTake,
+    string Summary,
+    IReadOnlyList<Rules.RuleExplanation> Rules,
+    string Limit,
+    decimal OrderWeight,
+    decimal Qualification,
+    decimal OpenWeight,
+    decimal Score);

@@ -25,7 +25,8 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 в шапке (`department.js`), `api.js` сам добавляет `?department=` к `/api/dashboard` и `/api/admin`, на сервере —
 `DepartmentScope` + фильтр `RequireDepartment`. Любой новый запрос к данным — с фильтром по отделу.
 `wwwroot/js`: `main.js` — вкладки; по файлу на вкладку (`overview.js` — Мониторинг, `executors.js`, `analytics.js`,
-`constructor.js`, `preview.js`, `departments.js`, `audit.js`, `demo.js` — Имитация АИС); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
+`constructor.js`, `preview.js`, `departments.js` + `sphere.js` (мастер своей сферы, сервер — `SphereBuilder`), `profile.js`
+(страница сотрудника `#executor-ID`), `audit.js`, `demo.js` — Имитация АИС); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
 `editor.js` (диалог), `charts.js`, `explain.js`, `presets.js`. Пульт демонстрации — `Endpoints/DemoEndpoints.cs`
 (прокси к эмулятору), генератор и симуляция — `src/AisEmulator.Api/Simulation`, шаблоны сфер —
 `Application/Configuration/DomainPresets.cs`.
@@ -41,7 +42,9 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 - Решение, объяснение, outbox и сводные метрики пишутся в одной транзакции.
 - Изменения конфигурации — через `ConfigurationService`: проверка, аудит, `BumpConfigVersionAsync`.
 
-## Дальше
+## Мотивация (свои фичи)
 
-К финалу — свои фичи: рейтинг исполнителей (балл = вес заявки × коэффициент качества), режим
-«готов взять больше нормы» (мягкий: только излишки), защита от работы на количество.
+Рейтинг (балл = вес × коэффициент качества, `Motivation.QualityOf`), режим «больше нормы» (второй ярус
+в Lua-скрипте выбора: только излишки, `Motivation.Extra`), защита (потолок, автоприостановка по качеству
+из `QualityTracker`, «вне рейтинга» ниже порога). Настройки — у `Department`, правка через
+`ConfigurationService.UpdateMotivationAsync`; интерфейс — `motivation.js`, рейтинг — в `analytics.js`.

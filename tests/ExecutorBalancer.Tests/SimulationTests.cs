@@ -67,4 +67,13 @@ public class SimulationTests
         Assert.NotNull(new SeedExecutorsRequest(0, []).Validate());
         Assert.NotNull(new SeedExecutorsRequest(5, [], Qualifications: [500m]).Validate());
     }
+
+    [Fact]
+    public void HastyExecutorsAreAStableMinority()
+    {
+        var hasty = Enumerable.Range(1, 1000).Count(id => SimulationService.IsHasty(id, 0.15));
+        Assert.InRange(hasty, 100, 200);
+        Assert.Equal(SimulationService.IsHasty(7, 0.15), SimulationService.IsHasty(7, 0.15));
+        Assert.DoesNotContain(Enumerable.Range(1, 100), id => SimulationService.IsHasty(id, 0));
+    }
 }

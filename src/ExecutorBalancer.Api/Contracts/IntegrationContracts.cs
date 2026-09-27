@@ -13,7 +13,8 @@ public sealed record ExecutorRequest(
     bool IsActive,
     int? DailyLimit,
     decimal? QualificationWeight,
-    Dictionary<string, JsonElement>? Attributes);
+    Dictionary<string, JsonElement>? Attributes,
+    int? ExtraPercent = null);
 
 /// <summary>Проверки формы запроса. Типы параметров проверяются позже — по справочнику полей.</summary>
 public static class RequestValidation
@@ -55,6 +56,11 @@ public static class RequestValidation
         if (request.DailyLimit is < 0 or > 100_000)
         {
             errors["dailyLimit"] = ["от 0 до 100000 или null — без лимита"];
+        }
+
+        if (request.ExtraPercent is < 0 or > 100)
+        {
+            errors["extraPercent"] = ["от 0 до 100 процентов сверх нормы; 0 — режим выключен"];
         }
 
         if (request.QualificationWeight is < 0.1m or > 100m)

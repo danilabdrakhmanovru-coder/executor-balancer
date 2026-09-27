@@ -99,6 +99,11 @@ api.MapPost("/orders", (OrderBody body, AisStore store, AisCommands commands) =>
         return BadDepartment();
     }
 
+    if (body.NextOrderId is { } next and > 0)
+    {
+        store.ContinueOrderIdsFrom(next);
+    }
+
     if (body.ParentId is { } parentId && store.GetOrder(parentId) is null)
     {
         return Results.Problem(statusCode: 400, title: "Родительская заявка не найдена");
@@ -123,8 +128,13 @@ api.MapPost("/orders/{id:long}/status", (long id, StatusBody body, AisCommands c
 api.MapGet("/simulation", (string? department, SimulationService simulation) =>
     AisCommands.IsValidDepartment(department) ? Results.Ok(simulation.Status(department)) : BadDepartment());
 
-api.MapPost("/simulation/start", (SimulationRequest body, SimulationService simulation) =>
+api.MapPost("/simulation/start", (SimulationRequest body, SimulationService simulation, AisStore store) =>
 {
+    if (body.Validate() is null && body.NextOrderId is { } next)
+    {
+        store.ContinueOrderIdsFrom(next);
+    }
+
     if ((body.Validate() ?? simulation.Start(body)) is { } error)
     {
         return Results.Problem(statusCode: 400, title: error);
@@ -206,7 +216,8 @@ internal sealed record ExecutorBody(string? Department, string? FullName, bool I
 
 internal sealed record ActiveBody(bool IsActive);
 
-internal sealed record OrderBody(string? Department, long? ParentId, Dictionary<string, JsonElement>? Attributes);
+internal sealed record OrderBody(string? Department, long? ParentId, Dictionary<string, JsonElement>? Attributes,
+    long? NextOrderId = null);
 
 internal sealed record StatusBody(string? Status);
 

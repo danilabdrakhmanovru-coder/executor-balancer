@@ -16,7 +16,11 @@ public sealed record StatDelta(
     int Secondary = 0,
     decimal FreeWeight = 0,
     int Closed = 0,
-    int Returned = 0)
+    int Returned = 0,
+    decimal ClosedWeight = 0,
+    decimal Points = 0,
+    int FastClosed = 0,
+    int Extra = 0)
 {
     public StatDelta Plus(StatDelta other) => new(
         ExecutorId,
@@ -28,7 +32,11 @@ public sealed record StatDelta(
         Secondary + other.Secondary,
         FreeWeight + other.FreeWeight,
         Closed + other.Closed,
-        Returned + other.Returned);
+        Returned + other.Returned,
+        ClosedWeight + other.ClosedWeight,
+        Points + other.Points,
+        FastClosed + other.FastClosed,
+        Extra + other.Extra);
 }
 
 /// <summary>
@@ -41,7 +49,7 @@ public static class ExecutorStats
     private static readonly string[] Columns =
     [
         "AssignedCount", "AssignedWeight", "PrimaryCount", "ReassignCount", "ParentCount", "SecondaryCount",
-        "FreeWeight", "ClosedCount", "ReturnedCount",
+        "FreeWeight", "ClosedCount", "ReturnedCount", "ClosedWeight", "Points", "FastClosedCount", "ExtraCount",
     ];
 
     private static readonly string Insert =
@@ -86,7 +94,8 @@ public static class ExecutorStats
             args.AddRange(
             [
                 bucket, row.ExecutorId, departmentId, row.Assigned, row.AssignedWeight, row.Primary, row.Reassign, row.Parent,
-                row.Secondary, row.FreeWeight, row.Closed, row.Returned,
+                row.Secondary, row.FreeWeight, row.Closed, row.Returned, row.ClosedWeight, row.Points, row.FastClosed,
+                row.Extra,
             ]);
         }
 

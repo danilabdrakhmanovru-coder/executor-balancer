@@ -8,14 +8,17 @@ import { buildPreviewForm, fillSample } from './preview.js';
 import { initAudit, refreshAudit, resetAudit } from './audit.js';
 import { initEditor } from './editor.js';
 import { initDemo, refreshDemo, invalidateDemoConfig } from './demo.js';
-import { refreshExecutors, setExecutorsEditable } from './executors.js';
+import { refreshExecutors, setExecutorsEditable, initExecutors } from './executors.js';
+import { refreshProfile, setProfileEditable } from './profile.js';
 import { renderPresets } from './presets.js';
 import { initDepartments, loadDepartments } from './department.js';
 import { initDepartmentsAdmin, refreshDepartments } from './departments.js';
+import { initMotivation, refreshMotivation } from './motivation.js';
 
 const TABS = {
   overview: { refresh: refreshOverview, every: 2000 },
   executors: { refresh: refreshExecutors, every: 5000 },
+  profile: { refresh: () => refreshProfile(profileId), every: 5000 },
   analytics: { refresh: refreshAnalytics, every: 15000 },
   constructor: {
     refresh: async () => {
@@ -28,14 +31,18 @@ const TABS = {
     },
   },
   preview: { refresh: async () => { await refreshConstructor(); buildPreviewForm(currentConfig()); } },
+  motivation: { refresh: refreshMotivation },
   departments: { refresh: refreshDepartments },
   audit: { refresh: refreshAudit },
   demo: { refresh: refreshDemo, every: 2000 },
 };
 // разделы «Настроек»: во вкладках одна кнопка, внутри — подменю
-const SETTINGS = ['constructor', 'preview', 'departments'];
+const SETTINGS = ['constructor', 'motivation', 'preview', 'departments'];
 
 let active = 'overview';
+let profileId = null;
+// страница сотрудника: #executor-15
+const PROFILE_HASH = /^executor-(\d{1,18})$/;
 let demoEnabled = false;
 let timer = null;
 let busy = false;
@@ -63,15 +70,19 @@ function schedule() {
 }
 
 function show(tab) {
-  active = TABS[tab] && (tab !== 'demo' || demoEnabled) ? tab : 'overview';
+  const profile = PROFILE_HASH.exec(tab || '');
+  if (profile) profileId = Number(profile[1]);
+  active = profile ? 'profile' : TABS[tab] && tab !== 'profile' && (tab !== 'demo' || demoEnabled) ? tab : 'overview';
   const inSettings = SETTINGS.includes(active);
   for (const b of $('tabs').querySelectorAll('.tab')) {
-    b.classList.toggle('active', b.dataset.tab === active || (inSettings && b.dataset.group === 'settings'));
+    b.classList.toggle('active', b.dataset.tab === active || (inSettings && b.dataset.group === 'settings')
+      || (active === 'profile' && b.dataset.tab === 'executors'));
   }
   for (const b of $('settings-nav').querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === active);
   $('settings-nav').classList.toggle('hidden', !inSettings);
   for (const name of Object.keys(TABS)) $(`tab-${name}`).classList.toggle('hidden', name !== active);
-  if (location.hash !== `#${active}`) history.replaceState(null, '', `#${active}`);
+  const hash = active === 'profile' ? `#executor-${profileId}` : `#${active}`;
+  if (location.hash !== hash) history.replaceState(null, '', hash);
   refresh();
   schedule();
 }
@@ -93,6 +104,7 @@ async function showApp() {
   // пульт демонстрации включается настройкой Demo:Enabled; выключен — вкладки нет
   demoEnabled = await api('/api/admin/demo/status').then(() => true, (e) => e.status === 502);
   setExecutorsEditable(demoEnabled);
+  setProfileEditable(demoEnabled);
   $('tab-button-demo').classList.toggle('hidden', !demoEnabled);
   show(location.hash.slice(1));
 }
@@ -142,6 +154,8 @@ function departmentChanged() {
   invalidateDemoConfig();
   exportLink();
   for (const d of document.querySelectorAll('dialog[open]')) d.close();
+  // сотрудник принадлежит одному отделу — в другом отделе открываем список
+  if (active === 'profile') { show('executors'); return; }
   refresh();
 }
 
@@ -154,8 +168,10 @@ initAnalytics(refresh);
 initConstructor(invalidateDemoConfig);
 initAudit();
 initDemo();
+initExecutors();
 initDepartments(departmentChanged);
 initDepartmentsAdmin();
+initMotivation();
 $('preview-sample').addEventListener('click', fillSample);
 
 api('/api/auth/me').then(showApp).catch(() => showLogin());

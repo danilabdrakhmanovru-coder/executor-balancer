@@ -43,7 +43,13 @@ public sealed record ExecutorMetrics(
     decimal? DeviationPercent,
     int Closed,
     int Returned,
-    decimal? ReturnRatePercent);
+    decimal? ReturnRatePercent,
+    decimal ClosedWeight = 0,
+    decimal Points = 0,
+    decimal? Quality = null,
+    int FastClosed = 0,
+    int Extra = 0,
+    int? Rank = null);
 
 /// <param name="MeanAbsDeviationPercent">Σ|назначенный вес − справедливый вес| / Σ справедливых весов, в процентах.</param>
 /// <param name="MaxAbsDeviationPercent">Наибольшее отклонение у одного исполнителя (среди достаточно загруженных).</param>
@@ -53,7 +59,7 @@ public sealed record FairnessSummary(
     int ExecutorsMeasured,
     decimal FreeWeight);
 
-public sealed record KindBreakdown(int Primary, int Reassign, int Parent, int Secondary);
+public sealed record KindBreakdown(int Primary, int Reassign, int Parent, int Secondary, int Extra = 0);
 
 public sealed record AnalyticsReport(
     AnalyticsPeriod Period,
@@ -161,15 +167,17 @@ public sealed class AnalyticsService(
 
         var byExecutor = rows.GroupBy(r => r.ExecutorId).ToDictionary(g => g.Key, g => g.ToList());
         var ids = snapshot.Executors.Keys.Union(byExecutor.Keys).Order();
-        var executors = ids
+        List<ExecutorMetrics> executors = ids
             .Select(id => Metrics(id, snapshot.Executors.GetValueOrDefault(id), byExecutor.GetValueOrDefault(id) ?? [],
                 fair.GetValueOrDefault(id)))
             .Where(m => m.IsActive || m.Assigned > 0 || m.Closed > 0 || m.Returned > 0)
             .ToList();
 
+        executors = RankByPoints(executors, snapshot.Motivation);
+
         var kinds = new KindBreakdown(
             rows.Sum(r => r.PrimaryCount), rows.Sum(r => r.ReassignCount),
-            rows.Sum(r => r.ParentCount), rows.Sum(r => r.SecondaryCount));
+            rows.Sum(r => r.ParentCount), rows.Sum(r => r.SecondaryCount), rows.Sum(r => r.ExtraCount));
 
         return new AnalyticsReport(period, ExecutorStats.HourStart(fromHour), now, size, timeline, executors, kinds,
             Fairness(executors));
@@ -221,7 +229,7 @@ public sealed class AnalyticsService(
             var total = 0;
             foreach (var row in day.OrderBy(r => r.BucketHour))
             {
-                total += row.AssignedCount;
+                total += row.AssignedCount - row.SecondaryCount; // как суточный счётчик: без возвратов с доработки
                 if (total >= limit)
                 {
                     result.Add((row.ExecutorId, FloorDiv(row.BucketHour + offset, size)));
@@ -239,6 +247,8 @@ public sealed class AnalyticsService(
         var freeWeight = rows.Sum(r => r.FreeWeight);
         var closed = rows.Sum(r => r.ClosedCount);
         var returned = rows.Sum(r => r.ReturnedCount);
+        var closedWeight = rows.Sum(r => r.ClosedWeight);
+        var points = rows.Sum(r => r.Points);
         decimal? deviation = fairWeight >= MinFairWeightForDeviation
             ? Math.Round((assignedWeight - fairWeight) / fairWeight * 100m, 2)
             : null;
@@ -262,7 +272,26 @@ public sealed class AnalyticsService(
             deviation,
             closed,
             returned,
-            returnRate);
+            returnRate,
+            closedWeight,
+            points,
+            Motivation.QualityFrom(closed, closedWeight, points),
+            rows.Sum(r => r.FastClosedCount),
+            rows.Sum(r => r.ExtraCount));
+    }
+
+    /// <summary>
+    /// Место в рейтинге — по баллам, но только при качестве не ниже порога отдела: иначе быстрый и небрежный
+    /// сотрудник набрал бы больше всех просто за счёт количества. Качество ещё не оценено — участвует.
+    /// </summary>
+    private static List<ExecutorMetrics> RankByPoints(List<ExecutorMetrics> executors, Motivation motivation)
+    {
+        var rank = 0;
+        var ranked = executors
+            .Where(e => e.Closed > 0 && (e.Quality is null || e.Quality >= motivation.QualityThreshold))
+            .OrderByDescending(e => e.Points).ThenByDescending(e => e.Quality ?? 0).ThenBy(e => e.Id)
+            .ToDictionary(e => e.Id, _ => ++rank);
+        return executors.Select(e => e with { Rank = ranked.TryGetValue(e.Id, out var r) ? r : null }).ToList();
     }
 
     private static FairnessSummary Fairness(IReadOnlyList<ExecutorMetrics> executors)

@@ -88,6 +88,8 @@ erDiagram
         varchar Code "уникален; адрес /departments/{code}/…"
         varchar Name
         varchar PresetId "шаблон сферы"
+        int MaxExtraPercent "потолок «больше нормы»"
+        numeric QualityThreshold "порог приостановки"
     }
     executors {
         bigint Id PK "id из АИС"
@@ -95,6 +97,7 @@ erDiagram
         varchar FullName
         bool IsActive
         int DailyLimit "null — без лимита"
+        int ExtraPercent "режим «больше нормы», %"
         numeric QualificationWeight
         jsonb AttributesJson "параметры конструктора"
     }
@@ -107,6 +110,8 @@ erDiagram
         jsonb AttributesJson
         bigint ExecutorId
         varchar PendingReason
+        int ReworkCount "доработок у текущего исполнителя"
+        numeric Points "балл: вес × качество"
     }
     assignments {
         bigint Id PK
@@ -160,6 +165,10 @@ erDiagram
         numeric FreeWeight
         int ClosedCount
         int ReturnedCount
+        numeric ClosedWeight
+        numeric Points "рейтинг"
+        int FastClosedCount
+        int ExtraCount "сверх нормы"
     }
     eligibility_hour_stats {
         int DepartmentId PK
@@ -193,8 +202,9 @@ erDiagram
    больше, не меньше, меньше, не больше, одно из, не из, содержит, в диапазоне. Типы проверяются
    при сохранении правила, поэтому на заявке правило не может «упасть».
 2. **Родитель и вторичные.** Если есть `parent_id` или заявка вернулась с доработки, и тот исполнитель
-   подходит — заявка уходит ему, суточный лимит не учитывается.
-3. **Выбор.** Среди подходящих с непревышенным лимитом — минимальный
+   подходит — заявка уходит ему, суточный лимит не учитывается (возврат с доработки и в счётчик не входит).
+3. **Выбор.** Сначала среди подходящих, кто не набрал суточную норму; если таких нет — среди сотрудников
+   в режиме «больше нормы», не достигших потолка `норма + N%` (только излишки). В ярусе — минимальный
    `score = (открытый вес + вес заявки) / квалификация`. При равенстве — меньше назначений за сутки на единицу
    квалификации, затем меньший id. Сравнение без деления (перекрёстным умножением) в целых тысячных — Lua и C#
    дают одинаковый результат.

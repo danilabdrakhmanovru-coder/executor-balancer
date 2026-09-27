@@ -57,6 +57,17 @@ public static class AdminEndpoints
         });
 
         group.MapPost("/preview", Preview);
+        group.MapPost("/preview/executors/{id:long}", CheckExecutor);
+
+        // мотивация: рейтинг, режим «больше нормы», защита от работы на количество
+        group.MapGet("/motivation", async (DepartmentScope d, ConfigurationService config, CancellationToken ct) =>
+            await config.GetMotivationAsync(d.Id, ct) is { } m ? Results.Ok(m) : NotFound());
+        group.MapPut("/motivation", async (DepartmentScope d, MotivationInput input, ConfigurationService config,
+                CancellationToken ct) =>
+            await config.UpdateMotivationAsync(d.Id, input, ct) is { } m ? Results.Ok(m) : NotFound());
+        group.MapPut("/executors/{id:long}/extra", async (DepartmentScope d, long id, ExtraModeInput input,
+                ConfigurationService config, CancellationToken ct) =>
+            await config.SetExtraModeAsync(d.Id, id, input, ct) ? Results.NoContent() : NotFound());
 
         // отделы: список общий, изменения — только пустых отделов (см. DepartmentService)
         group.MapGet("/departments", (DepartmentService departments, CancellationToken ct) => departments.ListAsync(ct));
@@ -87,6 +98,22 @@ public static class AdminEndpoints
         }
 
         return Results.Ok(await balancer.PreviewAsync(d.Id, request.ParentId, request.Attributes ?? NoAttributes, ct));
+    }
+
+    /// <summary>Разбор по правилам для одного сотрудника: почему ему подходит или не подходит такая заявка.</summary>
+    private static async Task<IResult> CheckExecutor(DepartmentScope d, long id, PreviewRequest request,
+        OrderBalancer balancer, CancellationToken ct)
+    {
+        var errors = new Dictionary<string, string[]>();
+        Contracts.RequestValidation.ValidateAttributes(request.Attributes, errors);
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        return await balancer.CheckExecutorAsync(d.Id, id, request.Attributes ?? NoAttributes, ct) is { } check
+            ? Results.Ok(check)
+            : NotFound();
     }
 
     /// <summary>Ошибки проверки — 400 с полями, конфликты с действующими правилами и данными — 409.</summary>

@@ -96,6 +96,56 @@ public static class DemoEndpoints
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/executors/seed", body, ct)).Result;
         });
 
+        // новый сотрудник отдела: заводится в АИС под следующим свободным номером из диапазона отдела
+        group.MapPost("/executors", async (DepartmentScope d, ExecutorRequest request, IBalancerDbContext db,
+            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
+        {
+            var errors = RequestValidation.Validate(request);
+            if (errors.Count == 0 && request.Attributes is not null)
+            {
+                (await directory.GetAsync(d.Id, ct)).Catalog.Parse(FieldOwner.Executor, request.Attributes, errors);
+            }
+
+            if (errors.Count > 0)
+            {
+                return Results.ValidationProblem(errors);
+            }
+
+            var client = http.CreateClient(AisOptions.HttpClientName);
+            var code = await CodeAsync(db, d, ct);
+            var first = (d.Id - 1L) * IdsPerDepartment + 1;
+            var last = first + IdsPerDepartment - 1;
+            var known = await Relay(client, HttpMethod.Get, $"api/ais/executors?department={code}", null, ct);
+            if (known.Error is not null)
+            {
+                return known.Error;
+            }
+
+            var inAis = known.Body is { ValueKind: JsonValueKind.Array } list
+                ? list.EnumerateArray().Select(x => x.GetProperty("id").GetInt64())
+                : [];
+            var inBalancer = await db.Executors.AsNoTracking().Where(x => x.Id >= first && x.Id <= last)
+                .Select(x => x.Id).ToListAsync(ct);
+            var id = inAis.Concat(inBalancer).Where(x => x >= first && x <= last).DefaultIfEmpty(first - 1).Max() + 1;
+            if (id > last)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "В отделе нет свободных номеров",
+                    detail: $"для демонстрации — до {IdsPerDepartment} сотрудников в отделе");
+            }
+
+            var body = new
+            {
+                Department = code,
+                FullName = request.FullName!.Trim(),
+                request.IsActive,
+                request.DailyLimit,
+                request.QualificationWeight,
+                request.Attributes,
+            };
+            var created = await Relay(client, HttpMethod.Put, $"api/ais/executors/{id}", body, ct);
+            return created.Error ?? Results.Ok(new { Id = id });
+        });
+
         group.MapPut("/executors/{id:long}", async (DepartmentScope d, long id, ExecutorRequest request,
             IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
@@ -145,6 +195,7 @@ public static class DemoEndpoints
             var body = new
             {
                 Department = await CodeAsync(db, d, ct),
+                NextOrderId = await NextOrderIdAsync(db, ct),
                 request.RatePerHour,
                 OrderFields = Specs(snapshot, FieldOwner.Order),
             };
@@ -177,7 +228,11 @@ public static class DemoEndpoints
             }
 
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/orders",
-                new { Department = await CodeAsync(db, d, ct), request.ParentId, Attributes = request.Attributes ?? new() },
+                new
+                {
+                    Department = await CodeAsync(db, d, ct), request.ParentId, Attributes = request.Attributes ?? new(),
+                    NextOrderId = await NextOrderIdAsync(db, ct),
+                },
                 ct)).Result;
         });
 
@@ -260,6 +315,10 @@ public static class DemoEndpoints
     /// <summary>Код отдела для АИС. Формат кода проверен при создании отдела — в адрес запроса он попадает как есть.</summary>
     private static Task<string> CodeAsync(IBalancerDbContext db, DepartmentScope d, CancellationToken ct) =>
         db.Departments.AsNoTracking().Where(x => x.Id == d.Id).Select(x => x.Code).FirstAsync(ct);
+
+    /// <summary>С какого номера эмулятору продолжать заявки, чтобы не совпасть с уже принятыми (после его перезапуска).</summary>
+    private static async Task<long> NextOrderIdAsync(IBalancerDbContext db, CancellationToken ct) =>
+        (await db.Orders.AsNoTracking().MaxAsync(o => (long?)o.Id, ct) ?? 0) + 1;
 
     private static IResult Invalid(string field, string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [message] });

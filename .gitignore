@@ -5,3 +5,6 @@ obj/
 *.user
 .env
 TestResults/
+
+# снимок Redis при локальном запуске
+dump.rdb

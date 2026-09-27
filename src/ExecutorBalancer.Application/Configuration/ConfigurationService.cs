@@ -83,6 +83,110 @@ public sealed class ConfigurationService(
             .ToList();
     }
 
+    // ---------- мотивация ----------
+
+    public async Task<MotivationInput?> GetMotivationAsync(int departmentId, CancellationToken cancellationToken)
+    {
+        var d = await db.Departments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == departmentId, cancellationToken);
+        return d is null ? null : ToInput(d);
+    }
+
+    /// <summary>Настройки рейтинга и режима «больше нормы» отдела. Проверка диапазонов, журнал, новая версия.</summary>
+    public async Task<MotivationInput?> UpdateMotivationAsync(int departmentId, MotivationInput input,
+        CancellationToken cancellationToken)
+    {
+        var errors = new Dictionary<string, string[]>();
+        if (input.FastCloseSeconds is < 0 or > 86_400)
+        {
+            errors["fastCloseSeconds"] = ["от 0 (не проверять) до 86400 секунд"];
+        }
+
+        foreach (var (key, value) in new[]
+                 {
+                     ("reworkPenalty", input.ReworkPenalty), ("fastClosePenalty", input.FastClosePenalty),
+                     ("qualityThreshold", input.QualityThreshold), ("heavyQualityThreshold", input.HeavyQualityThreshold),
+                 })
+        {
+            if (value is < 0 or > 1)
+            {
+                errors[key] = ["доля от 0 до 1"];
+            }
+        }
+
+        if (input.MaxExtraPercent is < 0 or > 100)
+        {
+            errors["maxExtraPercent"] = ["от 0 (режим выключен) до 100 процентов"];
+        }
+
+        if (input.HeavyQualityThreshold < input.QualityThreshold)
+        {
+            errors["heavyQualityThreshold"] = ["не ниже порога приостановки режима"];
+        }
+
+        if (input.HeavyWeight is < MinWeight or > MaxWeight)
+        {
+            errors["heavyWeight"] = [$"от {MinWeight} до {MaxWeight}"];
+        }
+
+        ThrowIfAny(errors);
+        var department = await db.Departments.FirstOrDefaultAsync(x => x.Id == departmentId, cancellationToken);
+        if (department is null)
+        {
+            return null;
+        }
+
+        var before = ToInput(department);
+        department.FastCloseSeconds = input.FastCloseSeconds;
+        department.ReworkPenalty = input.ReworkPenalty;
+        department.FastClosePenalty = input.FastClosePenalty;
+        department.MaxExtraPercent = input.MaxExtraPercent;
+        department.QualityThreshold = input.QualityThreshold;
+        department.HeavyQualityThreshold = input.HeavyQualityThreshold;
+        department.HeavyWeight = input.HeavyWeight;
+        await SaveWithAuditAsync(departmentId, "motivation_updated", "department", () => departmentId, before,
+            ToInput(department), cancellationToken);
+        return ToInput(department);
+    }
+
+    /// <summary>
+    /// Режим «готов взять больше нормы» у сотрудника отдела: процент сверх суточного лимита, не выше потолка отдела.
+    /// false — сотрудника в отделе нет.
+    /// </summary>
+    public async Task<bool> SetExtraModeAsync(int departmentId, long executorId, ExtraModeInput input,
+        CancellationToken cancellationToken)
+    {
+        var department = await db.Departments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == departmentId, cancellationToken);
+        var executor = await db.Executors.FirstOrDefaultAsync(e => e.Id == executorId && e.DepartmentId == departmentId,
+            cancellationToken);
+        if (department is null || executor is null)
+        {
+            return false;
+        }
+
+        if (input.Percent < 0 || input.Percent > department.MaxExtraPercent)
+        {
+            ThrowIfAny(new Dictionary<string, string[]>
+            {
+                ["percent"] = [$"от 0 до {department.MaxExtraPercent}% — потолок отдела"],
+            });
+        }
+
+        if (input.Percent > 0 && executor.DailyLimit is null)
+        {
+            throw new ConfigurationConflictException(
+                "у сотрудника нет суточного лимита — норма не задана, ему и так достаётся сколько распределится");
+        }
+
+        var before = new { executor.FullName, executor.ExtraPercent };
+        executor.ExtraPercent = input.Percent;
+        await SaveWithAuditAsync(departmentId, "extra_mode_changed", "executor", () => (int)Math.Min(executorId, int.MaxValue),
+            before, new { executor.FullName, executor.ExtraPercent }, cancellationToken);
+        return true;
+    }
+
+    private static MotivationInput ToInput(Department d) => new(d.FastCloseSeconds, d.ReworkPenalty, d.FastClosePenalty,
+        d.MaxExtraPercent, d.QualityThreshold, d.HeavyQualityThreshold, d.HeavyWeight);
+
     // ---------- шаблоны сфер ----------
 
     /// <summary>Шаблоны и признак «сейчас применён»: все параметры шаблона есть в справочнике.</summary>
@@ -130,6 +234,7 @@ public sealed class ConfigurationService(
             db.WeightRules.RemoveRange(await db.WeightRules.Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken));
             db.FieldDefinitions.RemoveRange(await db.FieldDefinitions.Where(f => f.DepartmentId == departmentId).ToListAsync(cancellationToken));
             department.PresetId = preset.Id;
+            department.SphereTitle = null;
             await db.SaveChangesAsync(cancellationToken);
 
             db.FieldDefinitions.AddRange(fields);

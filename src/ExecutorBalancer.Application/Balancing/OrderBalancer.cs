@@ -18,6 +18,7 @@ public sealed class OrderBalancer(
     IBalancerDbContext db,
     ExecutorDirectory directory,
     ILoadStore loadStore,
+    QualityTracker quality,
     IOptions<BalancerOptions> options,
     TimeProvider clock,
     ILogger<OrderBalancer> logger)
@@ -103,22 +104,36 @@ public sealed class OrderBalancer(
 
         var previousStatus = order.Status;
         var now = clock.GetUtcNow();
+        var closed = status is OrderStatus.Accept or OrderStatus.Reject;
+        var returned = previousStatus == OrderStatus.Processed && status == OrderStatus.Await;
         order.Status = status;
-        order.ClosedAt = status is OrderStatus.Accept or OrderStatus.Reject ? now : null;
+        order.ClosedAt = closed ? now : null;
         order.PendingReason = status == OrderStatus.Processed ? WaitingReason : null;
+        StatDelta? delta = null;
+        if (order.ExecutorId is { } owner && (closed || returned))
+        {
+            if (returned)
+            {
+                order.ReworkCount++;
+                delta = new StatDelta(owner, Returned: 1);
+            }
+            else
+            {
+                // балл рейтинга = вес заявки × коэффициент качества (доработки, слишком быстрое закрытие)
+                var motivation = (await directory.GetAsync(order.DepartmentId, cancellationToken)).Motivation;
+                var factor = motivation.QualityOf(order.ReworkCount, now - order.AssignedAt, out var fast);
+                order.Points = Math.Round(order.Weight * factor, 3);
+                delta = new StatDelta(owner, Closed: 1, ClosedWeight: order.Weight, Points: order.Points.Value,
+                    FastClosed: fast ? 1 : 0);
+            }
+        }
 
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             await db.SaveChangesAsync(cancellationToken);
-            if (order.ExecutorId is { } owner)
+            if (delta is not null)
             {
-                var closed = status is OrderStatus.Accept or OrderStatus.Reject;
-                var returned = previousStatus == OrderStatus.Processed && status == OrderStatus.Await;
-                if (closed || returned)
-                {
-                    await ExecutorStats.RecordAsync(db, now, order.DepartmentId,
-                        [new StatDelta(owner, Closed: closed ? 1 : 0, Returned: returned ? 1 : 0)], cancellationToken);
-                }
+                await ExecutorStats.RecordAsync(db, now, order.DepartmentId, [delta], cancellationToken);
             }
 
             await transaction.CommitAsync(cancellationToken);
@@ -180,6 +195,12 @@ public sealed class OrderBalancer(
         if (incoming.QualificationWeight is { } qualification)
         {
             executor.QualificationWeight = qualification;
+        }
+
+        if (incoming.ExtraPercent is { } extra)
+        {
+            // сотрудник сам отметил в АИС, что готов взять больше нормы; не передано — прежняя отметка остаётся
+            executor.ExtraPercent = extra;
         }
 
         executor.AttributesJson = JsonSerializer.Serialize(incoming.Attributes);
@@ -263,36 +284,46 @@ public sealed class OrderBalancer(
             }
         }
 
-        ExecutorProfile? best = null;
-        ExecutorLoad? bestLoad = null;
+        // тот же порядок, что в скрипте выбора: сначала те, кто не набрал норму, затем излишки — добровольцам
+        var extras = await ExtraDecisionsAsync(snapshot, matching, explanation.OrderWeight, cancellationToken);
+        var best = new (ExecutorProfile Executor, ExecutorLoad Load)?[2];
         foreach (var executor in matching)
         {
             var load = loads.GetValueOrDefault(executor.Id) ?? new ExecutorLoad(0, 0, 0);
-            if (executor.DailyLimit is { } limit && load.AssignedToday >= limit)
+            var extra = extras.GetValueOrDefault(executor.Id);
+            var slot = new CandidateSlot(executor.Id, LoadMath.ToMilli(executor.QualificationWeight), executor.DailyLimit,
+                extra?.ExtraLimit);
+            if (executor.DailyLimit is not null && load.AssignedToday >= slot.Cap)
             {
                 explanation.Candidates.Add(new(executor.Id, executor.FullName, "daily_limit_exceeded",
-                    $"исчерпан суточный лимит ({load.AssignedToday} из {limit})", null, load.AssignedToday));
+                    LimitReason(load.AssignedToday, executor.DailyLimit, extra), null, load.AssignedToday));
                 continue;
             }
 
-            var qualification = LoadMath.ToMilli(executor.QualificationWeight);
-            explanation.Candidates.Add(new(executor.Id, executor.FullName, "eligible", null,
-                LoadMath.Score(load.OpenWeightMilli, weight, qualification), load.AssignedToday));
-            if (best is null || LoadMath.IsBetter(weight,
-                    load.OpenWeightMilli, qualification, load.AssignedToday, executor.Id,
-                    bestLoad!.OpenWeightMilli, LoadMath.ToMilli(best.QualificationWeight), bestLoad.AssignedToday, best.Id))
+            var tier = executor.DailyLimit is { } limit && load.AssignedToday >= limit ? 1 : 0;
+            explanation.Candidates.Add(new(executor.Id, executor.FullName, tier == 0 ? "eligible" : "over_norm",
+                tier == 0 ? null : $"норма набрана ({load.AssignedToday} из {executor.DailyLimit}), в режиме «больше нормы» " +
+                                   $"до {extra?.ExtraLimit} — берёт только излишки",
+                LoadMath.Score(load.OpenWeightMilli, weight, slot.QualificationMilli), load.AssignedToday));
+            if (best[tier] is not { } current || LoadMath.IsBetter(weight,
+                    load.OpenWeightMilli, slot.QualificationMilli, load.AssignedToday, executor.Id,
+                    current.Load.OpenWeightMilli, LoadMath.ToMilli(current.Executor.QualificationWeight),
+                    current.Load.AssignedToday, current.Executor.Id))
             {
-                best = executor;
-                bestLoad = load;
+                best[tier] = (executor, load);
             }
         }
 
-        if (explanation.ChosenExecutorId is null && best is not null)
+        var overNorm = best[0] is null && best[1] is not null;
+        var winner = (best[0] ?? best[1])?.Executor;
+        if (explanation.ChosenExecutorId is null && winner is not null)
         {
-            explanation.Kind = AssignmentKind.Primary.ToString();
-            explanation.ChosenExecutorId = best.Id;
-            explanation.ChosenScore = explanation.Candidates.First(c => c.ExecutorId == best.Id).Score;
-            explanation.Decision = $"{best.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})";
+            explanation.Kind = (overNorm ? AssignmentKind.Extra : AssignmentKind.Primary).ToString();
+            explanation.ChosenExecutorId = winner.Id;
+            explanation.ChosenScore = explanation.Candidates.First(c => c.ExecutorId == winner.Id).Score;
+            explanation.Decision = overNorm
+                ? $"{winner.FullName}: у всех подходящих норма на сегодня набрана, заявку берёт сверх нормы (режим «больше нормы»)"
+                : $"{winner.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})";
         }
         else if (explanation.ChosenExecutorId is null)
         {
@@ -307,6 +338,64 @@ public sealed class OrderBalancer(
         }
 
         return explanation;
+    }
+
+    /// <summary>
+    /// Почему конкретному сотруднику подходит (или нет) заявка с такими параметрами: каждое правило по отдельности,
+    /// активность, суточная норма и нагрузка. Ничего не назначает. null — сотрудника в отделе нет.
+    /// </summary>
+    public async Task<ExecutorCheck?> CheckExecutorAsync(int departmentId, long executorId,
+        IReadOnlyDictionary<string, JsonElement> attributes, CancellationToken cancellationToken)
+    {
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
+        if (!snapshot.Executors.TryGetValue(executorId, out var executor))
+        {
+            return null;
+        }
+
+        var errors = new Dictionary<string, string[]>();
+        var values = snapshot.Catalog.Parse(FieldOwner.Order, attributes, errors);
+        if (errors.Count > 0)
+        {
+            throw new InvalidInputException(errors);
+        }
+
+        var weight = snapshot.OrderWeight(values);
+        var rules = snapshot.Rules.Select(rule => rule.Explain(values, executor.Values)).ToList();
+        var load = (await loadStore.GetLoadsAsync(Today(), cancellationToken)).GetValueOrDefault(executor.Id)
+                   ?? new ExecutorLoad(0, 0, 0);
+        var extra = (await ExtraDecisionsAsync(snapshot, [executor], weight, cancellationToken)).GetValueOrDefault(executor.Id);
+        var matches = rules.All(r => r.Passed);
+
+        string limit;
+        var withinLimit = true;
+        if (executor.DailyLimit is not { } norm)
+        {
+            limit = $"суточного лимита нет — сегодня получил {load.AssignedToday}";
+        }
+        else if (load.AssignedToday < norm)
+        {
+            limit = $"норма не набрана: {load.AssignedToday} из {norm}";
+        }
+        else if (extra?.ExtraLimit is { } cap && load.AssignedToday < cap)
+        {
+            limit = $"норма набрана ({load.AssignedToday} из {norm}), в режиме «больше нормы» — ещё до {cap}, только излишки";
+        }
+        else
+        {
+            withinLimit = false;
+            limit = $"суточный лимит исчерпан: {load.AssignedToday} из {extra?.ExtraLimit ?? norm}"
+                    + (extra?.Note is { } note ? $"; {note}" : "");
+        }
+
+        var qualification = LoadMath.ToMilli(executor.QualificationWeight);
+        var summary = !executor.IsActive ? "сейчас не на работе — заявки не получает"
+            : !matches ? "не подходит: не выполнено правило — см. отмеченное красным"
+            : !withinLimit ? "подходит по правилам, но суточный лимит исчерпан"
+            : "подходит: все правила выполнены, может получить заявку";
+        return new ExecutorCheck(executor.Id, executor.FullName, executor.IsActive, matches && executor.IsActive && withinLimit,
+            summary, rules, limit, weight, executor.QualificationWeight, load.OpenWeightMilli / 1000m,
+            LoadMath.Score(load.OpenWeightMilli, LoadMath.ToMilli(weight), qualification));
     }
 
     /// <summary>Отбор по активности и правилам конструктора; отсеянные сразу попадают в объяснение.</summary>
@@ -352,7 +441,10 @@ public sealed class OrderBalancer(
         {
             // исполнитель родительской или прежний исполнитель: суточный лимит не применяется
             var slot = new CandidateSlot(forced.Executor.Id, LoadMath.ToMilli(forced.Executor.QualificationWeight), null);
-            var forcedPick = await loadStore.PickAsync(new PickRequest(order.Id, weight, day, reopen, [slot]), cancellationToken);
+            // вернувшаяся с доработки заявка у того же исполнителя — не новая заявка за день
+            var counts = forced.Kind != AssignmentKind.Secondary;
+            var forcedPick = await loadStore.PickAsync(new PickRequest(order.Id, weight, day, reopen, [slot], counts),
+                cancellationToken);
             if (forcedPick.Status == PickStatus.NoCandidate)
             {
                 explanation.Notes.Add($"{forced.Executor.FullName} стал неактивен в момент назначения, выбираем из остальных");
@@ -364,11 +456,13 @@ public sealed class OrderBalancer(
             }
         }
 
+        var extras = await ExtraDecisionsAsync(snapshot, matching, order.Weight, cancellationToken);
         pick ??= await loadStore.PickAsync(new PickRequest(order.Id, weight, day, reopen,
-            matching.Select(e => new CandidateSlot(e.Id, LoadMath.ToMilli(e.QualificationWeight), e.DailyLimit)).ToList()),
+            matching.Select(e => new CandidateSlot(e.Id, LoadMath.ToMilli(e.QualificationWeight), e.DailyLimit,
+                extras.GetValueOrDefault(e.Id)?.ExtraLimit)).ToList()),
             cancellationToken);
 
-        AddLoadReport(explanation, pick, matching, weight);
+        AddLoadReport(explanation, pick, matching, weight, extras);
 
         if (pick.Status == PickStatus.AlreadyAssigned)
         {
@@ -399,6 +493,11 @@ public sealed class OrderBalancer(
 
         var executorId = pick.ExecutorId!.Value;
         var chosen = snapshot.Executors[executorId];
+        if (pick.Report.Any(r => r.ExecutorId == executorId && r.Verdict == "over_norm"))
+        {
+            kind = AssignmentKind.Extra;
+        }
+
         explanation.Kind = kind.ToString();
         explanation.ChosenExecutorId = executorId;
         explanation.ChosenScore = explanation.Candidates.FirstOrDefault(c => c.ExecutorId == executorId)?.Score;
@@ -406,6 +505,8 @@ public sealed class OrderBalancer(
         {
             AssignmentKind.Parent => $"{chosen.FullName} ведёт родительскую заявку #{order.ParentId}",
             AssignmentKind.Secondary => $"{chosen.FullName} уже работал с этой заявкой",
+            AssignmentKind.Extra =>
+                $"{chosen.FullName}: у всех подходящих норма на сегодня набрана, заявку берёт сверх нормы (режим «больше нормы»)",
             _ => $"{chosen.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})",
         };
         MarkChosen(explanation, executorId);
@@ -443,6 +544,11 @@ public sealed class OrderBalancer(
                 CreatedAt = now,
                 NextAttemptAt = now,
             });
+            if (order.ExecutorId != executorId)
+            {
+                order.ReworkCount = 0; // доработки прежнего исполнителя новому в балл не засчитываются
+            }
+
             order.ExecutorId = executorId;
             order.AssignedAt = now;
             order.PendingReason = null;
@@ -451,7 +557,7 @@ public sealed class OrderBalancer(
                 cancellationToken);
             if (kind is AssignmentKind.Primary or AssignmentKind.Reassign)
             {
-                // кто мог получить эту заявку: по этим группам считается эталон справедливого распределения
+                // кто мог получить эту заявку (излишки сверх нормы в эталон не входят — они никому не причитались): по этим группам считается эталон справедливого распределения
                 await ExecutorStats.RecordEligibilityAsync(db, now, order.DepartmentId,
                     pick.Report.Where(r => r.Verdict == "eligible").Select(r => r.ExecutorId), order.Weight,
                     cancellationToken);
@@ -506,7 +612,25 @@ public sealed class OrderBalancer(
     private bool IsOrphaned(PickResult pick) =>
         pick.HeldSince is { } since && clock.GetUtcNow() - since > OrphanedHoldAge;
 
-    /// <summary>Показатели решения; заявки от родителя и вторичные — не свободный выбор.</summary>
+    /// <summary>
+    /// Режим «больше нормы» для подходящих сотрудников: потолок и причина, если режим сейчас не действует.
+    /// Качество читается, только если в отделе кто-то в этом режиме.
+    /// </summary>
+    private async Task<Dictionary<long, ExtraDecision>> ExtraDecisionsAsync(BalancerSnapshot snapshot,
+        List<ExecutorProfile> matching, decimal orderWeight, CancellationToken cancellationToken)
+    {
+        var volunteers = matching.Where(e => e.ExtraPercent > 0 && e.DailyLimit is not null).ToList();
+        if (volunteers.Count == 0)
+        {
+            return [];
+        }
+
+        var scores = await quality.GetAsync(snapshot.DepartmentId, cancellationToken);
+        return volunteers.ToDictionary(e => e.Id,
+            e => snapshot.Motivation.Extra(e, scores.GetValueOrDefault(e.Id), orderWeight));
+    }
+
+    /// <summary>Показатели решения; заявки от родителя, вторичные и сверх нормы — не свободный выбор.</summary>
     private static StatDelta[] StatDeltas(AssignmentKind kind, long executorId, decimal orderWeight)
     {
         var free = kind is AssignmentKind.Primary or AssignmentKind.Reassign;
@@ -517,12 +641,13 @@ public sealed class OrderBalancer(
                 Reassign: kind == AssignmentKind.Reassign ? 1 : 0,
                 Parent: kind == AssignmentKind.Parent ? 1 : 0,
                 Secondary: kind == AssignmentKind.Secondary ? 1 : 0,
-                FreeWeight: free ? orderWeight : 0),
+                FreeWeight: free ? orderWeight : 0,
+                Extra: kind == AssignmentKind.Extra ? 1 : 0),
         ];
     }
 
     private static void AddLoadReport(AssignmentExplanation explanation, PickResult pick,
-        List<ExecutorProfile> matching, long orderWeight)
+        List<ExecutorProfile> matching, long orderWeight, Dictionary<long, ExtraDecision> extras)
     {
         var reports = pick.Report.ToDictionary(r => r.ExecutorId);
         foreach (var executor in matching)
@@ -534,18 +659,26 @@ public sealed class OrderBalancer(
             }
 
             var verdict = report.Verdict;
+            var extra = extras.GetValueOrDefault(executor.Id);
             var reason = verdict switch
             {
                 "inactive" => "исполнитель неактивен",
-                "daily_limit_exceeded" => $"исчерпан суточный лимит ({report.AssignedToday} из {executor.DailyLimit})",
+                "daily_limit_exceeded" => LimitReason(report.AssignedToday, executor.DailyLimit, extra),
+                "over_norm" => $"норма набрана ({report.AssignedToday} из {executor.DailyLimit}), в режиме «больше нормы» " +
+                               $"до {extra?.ExtraLimit} — берёт только излишки",
                 _ => null,
             };
-            decimal? score = verdict == "eligible"
+            decimal? score = verdict is "eligible" or "over_norm"
                 ? LoadMath.Score(report.OpenWeightMilli, orderWeight, LoadMath.ToMilli(executor.QualificationWeight))
                 : null;
             explanation.Candidates.Add(new(executor.Id, executor.FullName, verdict, reason, score, report.AssignedToday));
         }
     }
+
+    private static string LimitReason(int assignedToday, int? limit, ExtraDecision? extra) =>
+        extra?.ExtraLimit is { } cap
+            ? $"набрана норма и запас режима «больше нормы» ({assignedToday} из {cap})"
+            : $"исчерпан суточный лимит ({assignedToday} из {limit})" + (extra?.Note is { } note ? $"; {note}" : "");
 
     private static void MarkChosen(AssignmentExplanation explanation, long executorId)
     {

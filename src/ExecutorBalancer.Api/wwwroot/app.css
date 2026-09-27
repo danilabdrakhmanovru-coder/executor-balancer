@@ -109,6 +109,7 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .svg-chart .line.series-c { stroke: var(--accent-3); } .svg-chart .point.series-c { fill: var(--accent-3); }
 .svg-chart .band { fill: rgba(var(--tblr-success-rgb), .1); }
 .svg-chart .zero { stroke: var(--muted); stroke-width: 1; }
+.svg-chart .threshold { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .svg-chart .dev-ok { fill: var(--ok); } .svg-chart .dev-warn { fill: var(--warn); } .svg-chart .dev-bad { fill: var(--bad); }
 .legend { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 8px; }
@@ -116,6 +117,9 @@ tr.fresh { animation: flash 1.2s ease-out; }
 
 /* формы */
 .form-grid { display: grid; gap: 12px; }
+.executor-quality { margin: 8px 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.today-cell { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.motivation-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 24px; }
 .field .form-hint { margin-top: 4px; }
 .sentence { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
 .value-editor { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -198,3 +202,36 @@ tr.fresh { animation: flash 1.2s ease-out; }
   .tile-value { font-size: 22px; }
   .lookup { width: 150px; }
 }
+
+/* разбор по правилам для одного сотрудника */
+.candidate-link { display: inline-flex; align-items: center; gap: 2px; text-align: left; font-weight: 600; }
+.candidate-link .icon { width: 14px; height: 14px; }
+.check-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rule-checks { display: grid; gap: 8px; margin-top: 12px; }
+.rule-check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.rule-check.ok { border-left: 4px solid var(--ok); }
+.rule-check.bad { border-left: 4px solid var(--bad); background: rgba(var(--tblr-danger-rgb), .04); }
+.rule-mark { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; flex: none; color: #fff; }
+.rule-check.ok .rule-mark { background: var(--ok); }
+.rule-check.bad .rule-mark { background: var(--bad); }
+.rule-mark .icon { width: 16px; height: 16px; }
+.rule-line { margin-top: 2px; }
+
+/* страница сотрудника */
+.executor-name { font-weight: 600; color: inherit; }
+.executor-name:hover { color: var(--tblr-primary); }
+.profile-avatar { background: var(--tblr-primary); color: #fff; font-weight: 700; font-size: 1.4rem; }
+.profile-avatar.off { background: var(--muted); }
+.skill-list { display: grid; gap: 14px; }
+.skill-label { font-weight: 600; margin-bottom: 4px; }
+.skill-values { display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-chip { font-size: 13px; font-weight: 500; padding: 5px 9px; }
+
+/* мастер своей сферы */
+.sphere-builder { display: grid; gap: 12px; }
+.sphere-params { display: grid; gap: 12px; }
+.sphere-param { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 10px; }
+.sphere-param-head { display: grid; grid-template-columns: 1fr 180px auto; gap: 10px; align-items: end; }
+.sphere-heavy { display: grid; grid-template-columns: 120px 1fr 1fr; gap: 10px; }
+.sphere-summary { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+@media (max-width: 640px) { .sphere-param-head, .sphere-heavy { grid-template-columns: 1fr; } }

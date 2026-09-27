@@ -8,9 +8,10 @@ PICK,REL=script('PickScript'),script('ReleaseScript')
 r=redis.Redis(port=int(__import__('os').environ.get('REDIS_PORT', '6379')),decode_responses=True); r.flushall()
 pick=r.register_script(PICK); rel=r.register_script(REL)
 K=lambda oid,day="20260928":["{eb}:open-weight","{eb}:open-count","{eb}:daily:"+day,"{eb}:active","{eb}:order:%d"%oid]
-def P(oid,w,cands,reopen=0,rr=r):
-    args=[w,reopen,259200]
-    for c in cands: args+=list(c)
+def P(oid,w,cands,reopen=0,rr=r,count=1):
+    args=[w,reopen,259200,count]
+    # четвёрки: id, квалификация, норма, потолок «больше нормы» (по умолчанию — как норма)
+    for c in cands: args+=list(c) if len(c)==4 else [*c, c[2]]
     return (rr if rr is r else rr).evalsha(pick.sha,5,*K(oid),*args) if False else pick(keys=K(oid),args=args,client=rr)
 def R(oid,state,delete=0): return rel(keys=["{eb}:open-weight","{eb}:open-count","{eb}:order:%d"%oid],args=[state,604800,delete])
 for i in (1,2,3): r.hset("{eb}:active",i,1)
@@ -59,4 +60,16 @@ cnt={int(k):int(v) for k,v in r.hgetall("{eb}:open-count").items()}; print(cnt)
 assert sum(cnt.values())==4000 and int(r.hget("{eb}:daily:20260928",1))<=300
 per=[int(r.hget("{eb}:open-weight",i))/q for i,q,_ in cands if i!=1]; print("spread per qual",max(per)-min(per))
 assert max(per)-min(per)<=1
+# «больше нормы»: доброволец (норма 1, потолок 2) получает заявку, только когда у остальных норма набрана
+r.flushall(); [r.hset("{eb}:active",i,1) for i in (1,2)]
+t=P(1,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='1', t            # обычный выбор: оба ниже нормы
+t=P(2,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='2' and '1|over_norm|1000|1' in t, t   # 2 ещё не набрал норму
+t=P(3,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='1' and '2|daily_limit_exceeded|1000|1' in t, t  # излишек — добровольцу
+t=P(4,1000,[(1,1000,1,2),(2,1000,1)]); assert t[0]=='none', t          # потолок набран
+# возврат с доработки к тому же исполнителю не засчитывается в суточную норму; откат ничего не возвращает
+r.flushall(); r.hset("{eb}:active",5,1)
+t=P(1,1000,[(5,1000,-1)]); assert t[0]=='assigned' and r.hget("{eb}:daily:20260928",5)=='1'
+assert R(1,'await')==1
+t=P(1,1000,[(5,1000,-1)],reopen=1,count=0); assert t[0]=='assigned' and r.hget("{eb}:daily:20260928",5)=='1', t
+assert R(1,'rolled-back',1)==1 and r.hget("{eb}:daily:20260928",5)=='1'
 print("LUA OK")

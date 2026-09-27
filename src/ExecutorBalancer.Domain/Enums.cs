@@ -51,4 +51,7 @@ public enum AssignmentKind
     Parent,
     Secondary,
     Reassign,
+
+    /// <summary>Сверх нормы: суточный лимит у всех подходящих исчерпан, заявку берёт доброволец.</summary>
+    Extra,
 }

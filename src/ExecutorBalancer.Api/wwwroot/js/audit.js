@@ -10,7 +10,17 @@ const ACTION = {
   weight_rule_deleted: ['Правило веса удалено', 'bad'],
   department_created: ['Новый отдел', 'ok'], department_renamed: ['Отдел переименован', ''],
   department_deleted: ['Отдел удалён', 'bad'],
+  motivation_updated: ['Мотивация изменена', 'warn'], extra_mode_changed: ['Больше нормы', ''],
 };
+const MOTIVATION = [
+  ['fastCloseSeconds', 'быстрое закрытие, с', (v) => v],
+  ['fastClosePenalty', 'штраф за быстрое', (v) => `${Math.round(v * 100)}%`],
+  ['reworkPenalty', 'штраф за доработку', (v) => `${Math.round(v * 100)}%`],
+  ['maxExtraPercent', 'потолок «больше нормы»', (v) => `${v}%`],
+  ['qualityThreshold', 'порог приостановки', (v) => `${Math.round(v * 100)}%`],
+  ['heavyQualityThreshold', 'порог для сложных', (v) => `${Math.round(v * 100)}%`],
+  ['heavyWeight', 'сложная — вес от', (v) => v],
+];
 const TYPE = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
 const OWNER = { Order: 'заявки', Executor: 'сотрудника' };
 const PAGE = 50;
@@ -89,6 +99,13 @@ function describe(entry) {
       return `Создан отдел ${quote(after.name)}${after.preset ? ` — сфера ${quote(after.preset)}` : ' без шаблона'}, код для АИС: ${after.code}`;
     case 'department_renamed': return `Отдел ${quote(before.name)} переименован в ${quote(after.name)}`;
     case 'department_deleted': return `Удалён отдел ${quote(before.name)}`;
+    case 'motivation_updated':
+      return `Настройки рейтинга и сверхнормы: ${changes(before, after, MOTIVATION.map(([key, label, show]) =>
+        [key, label, (x) => show(x[key])]))}`;
+    case 'extra_mode_changed': {
+      const show = (p) => (p > 0 ? `+${p}% к норме` : 'выключен');
+      return `${after.fullName}: режим «больше нормы» ${show(before.extraPercent)} → ${show(after.extraPercent)}`;
+    }
     case 'field_created':
       return `Добавлен параметр ${OWNER[after.owner] || ''} ${quote(after.label)} — ${TYPE[after.type] || after.type}`
         + `${after.options?.length ? `: ${after.options.join(', ')}` : ''}`;

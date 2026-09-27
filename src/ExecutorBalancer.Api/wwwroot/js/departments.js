@@ -3,6 +3,7 @@
 import { api, problemText } from './api.js';
 import { $, el, row, badge, button, actions, fmt, toast, field, input, select, emptyRow } from './dom.js';
 import { openEditor } from './editor.js';
+import { sphereBuilder } from './sphere.js';
 import { allDepartments, currentDepartment, loadDepartments, selectDepartment } from './department.js';
 
 const MAIN_ID = 1;
@@ -46,18 +47,31 @@ export async function refreshDepartments() {
 async function create() {
   const list = await presetList();
   const name = input('text', '', { maxlength: '120', required: '', placeholder: 'например, Отдел кредитования' });
-  const sphere = select([...list.map((p) => [p.id, p.title]), ['', 'Пустой — настрою параметры сам']], list[0]?.id ?? '');
+  const CUSTOM = '__custom';
+  const sphere = select([...list.map((p) => [p.id, p.title]), [CUSTOM, 'Своя сфера — задать параметры и правила'],
+    ['', 'Пустой — настрою параметры сам']], list[0]?.id ?? '');
   const code = input('text', '', { maxlength: '32', placeholder: 'подберётся сам' });
+  const builder = sphereBuilder();
+  const builderBox = el('div', null, 'hidden');
+  builderBox.append(...builder.nodes);
+  sphere.addEventListener('change', () => builderBox.classList.toggle('hidden', sphere.value !== CUSTOM));
   openEditor('Новый отдел', [
     el('p', 'Отдел — отдельное пространство: свои параметры и правила, сотрудники, заявки и отчёты. '
       + 'Остальные отделы не меняются.', 'hint'),
     field('Название', name),
     field('Сфера', sphere, 'Готовый набор параметров, правил и весов — потом его можно дополнить в «Параметрах и правилах».'),
+    builderBox,
     field('Код для АИС', code, 'Латинские буквы, цифры, «-» и «_». По нему АИС отправляет заявки отдела.'),
   ], async () => {
+    const custom = sphere.value === CUSTOM;
     const created = await api('/api/admin/departments', {
       method: 'POST',
-      body: { name: name.value.trim(), code: code.value.trim() || null, presetId: sphere.value || null },
+      body: {
+        name: name.value.trim(),
+        code: code.value.trim() || null,
+        presetId: custom ? null : sphere.value || null,
+        sphere: custom ? builder.read() : null,
+      },
     });
     toast(`Отдел «${created.name}» создан и открыт`);
     await selectDepartment(created.id);
