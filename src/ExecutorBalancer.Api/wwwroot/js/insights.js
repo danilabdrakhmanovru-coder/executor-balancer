@@ -116,7 +116,7 @@ function renderStatus(status) {
   runButton.disabled = running || !status.isConfigured;
   $('ai-status').textContent = status.isConfigured
     ? (status.last ? '' : can('Manager')
-      ? `Подключена модель ${status.model}. Нажмите «Разобрать с ИИ» — разбор займёт до минуты.`
+      ? `Подключена модель ${status.model}. Нажмите «Разобрать с ИИ» — облачная модель отвечает за 10–60 секунд, своя без видеокарты — за несколько минут.`
       : `Подключена модель ${status.model}. Запустить разбор может руководитель или администратор — результат появится здесь.`)
     : 'ИИ не подключён. Чтобы включить, задайте в .env адрес модели AI_BASE_URL, её имя AI_MODEL и при необходимости ключ '
       + 'AI_API_KEY (подходит любая модель с OpenAI-совместимым API, в том числе своя в контуре компании). '
@@ -138,7 +138,7 @@ export function initInsights() {
     running = true;
     $('ai-run').disabled = true;
     $('ai-run-text').textContent = 'ИИ разбирает…';
-    $('ai-status').textContent = 'Собираем сводку и ждём ответ модели — обычно 10–60 секунд.';
+    $('ai-status').textContent = 'Собираем сводку и ждём ответ модели: облачная — 10–60 секунд, своя без видеокарты — до нескольких минут.';
     try {
       renderAnalysis(await api('/api/admin/ai/analysis', { method: 'POST' }));
       $('ai-status').textContent = '';

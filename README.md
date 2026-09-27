@@ -207,13 +207,25 @@ curl "$URL/departments/logistics/metrics?period=today" -H "X-Api-Key: $KEY"
 (`POST {адрес}/chat/completions`). Настройки — только в `.env` (он не попадает в git), после правки —
 `docker compose up -d`. Без этих строк всё работает, как раньше, кнопка «Разобрать с ИИ» неактивна.
 
-**Вариант 1 — своя модель на компьютере (бесплатно, данные никуда не уходят).** Установить [Ollama](https://ollama.com),
-в PowerShell: `ollama pull qwen2.5:7b` (около 5 ГБ; на ноутбуке без видеокарты ответ — 30–90 секунд). В `.env`:
+**Вариант 1 — своя модель на компьютере (бесплатно, данные никуда не уходят).** Установить Ollama
+(`winget install Ollama.Ollama` или [ollama.com](https://ollama.com)), разрешить ей длинные запросы и скачать модель:
+
+```powershell
+setx OLLAMA_CONTEXT_LENGTH 8192     # сводка отдела длиннее окна по умолчанию; после — перезапустить Ollama
+ollama pull qwen2.5:7b              # ~5 ГБ, хорошо пишет по-русски; для слабого ноутбука — qwen2.5:3b (~2 ГБ)
+ollama run qwen2.5:7b "Ответь одним словом: работает?"
+```
+
+В `.env`:
 
 ```
 AI_BASE_URL=http://host.docker.internal:11434/v1
 AI_MODEL=qwen2.5:7b
+AI_TIMEOUT_SECONDS=300
+AI_MAX_TOKENS=900
 ```
+
+Без видеокарты ответ идёт минуту-три, поэтому ожидание увеличено; `AI_MAX_TOKENS` ограничивает длину ответа.
 
 **Вариант 2 — Yandex AI Studio (российское облако, оплата в рублях).** В консоли Yandex Cloud: создать каталог
 (его ID — `AI_PROJECT`), сервисный аккаунт с ролью `ai.languageModels.user` и **API-ключ** для него (область
