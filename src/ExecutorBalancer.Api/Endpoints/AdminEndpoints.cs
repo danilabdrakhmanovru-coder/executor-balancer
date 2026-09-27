@@ -55,7 +55,12 @@ public static class AdminEndpoints
 
         // ИИ-разбор заявок: подсказка руководителю, в распределении не участвует
         group.MapGet("/ai/status", (DepartmentScope d, AiAnalyst ai) =>
-            Results.Ok(new { ai.IsConfigured, Model = ai.IsConfigured ? ai.Model : null, Last = ai.Last(d.Id) }));
+            Results.Ok(new
+            {
+                ai.IsConfigured, Model = ai.IsConfigured ? ai.Model : null, Last = ai.Last(d.Id),
+                // новый разбор по отделу — не чаще раза в минуту; интерфейс показывает обратный отсчёт
+                RetryInSeconds = ai.SecondsUntilNew(d.Id),
+            }));
         group.MapPost("/ai/analysis", async (DepartmentScope d, AiAnalyst ai, CancellationToken ct) =>
         {
             try

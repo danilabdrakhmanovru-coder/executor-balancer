@@ -52,6 +52,12 @@ public sealed class AiGate(TimeProvider clock) : IDisposable
 
     public AiAnalysis? Last(int departmentId) => _last.GetValueOrDefault(departmentId);
 
+    /// <summary>Через сколько секунд по отделу можно запросить новый разбор (0 — уже можно).</summary>
+    public int SecondsUntilNew(int departmentId) =>
+        _last.TryGetValue(departmentId, out var last)
+            ? (int)Math.Ceiling(Math.Max(0, (Reuse - (clock.GetUtcNow() - last.GeneratedAt)).TotalSeconds))
+            : 0;
+
     public async Task<AiAnalysis> RunAsync(int departmentId, Func<Task<AiAnalysis>> run)
     {
         if (_last.TryGetValue(departmentId, out var recent) && clock.GetUtcNow() - recent.GeneratedAt < Reuse)
@@ -140,6 +146,8 @@ public sealed class AiAnalyst(
     public string Model => chat.Model;
 
     public AiAnalysis? Last(int departmentId) => gate.Last(departmentId);
+
+    public int SecondsUntilNew(int departmentId) => gate.SecondsUntilNew(departmentId);
 
     public Task<AiAnalysis> AnalyzeAsync(int departmentId, CancellationToken cancellationToken)
     {

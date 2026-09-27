@@ -6,6 +6,24 @@ import { can } from './session.js';
 
 let fieldKey = null;
 let running = false;
+let configured = false;
+let retryUntil = 0; // до этого момента новый разбор по отделу не запрашивается — модель отдала бы прежний
+let countdown = null;
+
+/** Кнопка разбора: «ИИ разбирает…», обратный отсчёт до нового разбора или готова. */
+function renderButton() {
+  const left = Math.ceil((retryUntil - Date.now()) / 1000);
+  const button = $('ai-run');
+  button.disabled = running || !configured || left > 0;
+  $('ai-run-text').textContent = running ? 'ИИ разбирает…' : left > 0 ? `Новый разбор — через ${left} с` : 'Разобрать с ИИ';
+  if (left <= 0 && countdown) { clearInterval(countdown); countdown = null; }
+}
+
+function waitBeforeNew(seconds) {
+  retryUntil = Date.now() + Math.max(0, seconds) * 1000;
+  if (seconds > 0 && !countdown) countdown = setInterval(renderButton, 1000);
+  renderButton();
+}
 
 const LEVEL = { high: ['важно', 'bad'], medium: ['заметно', 'warn'], low: ['к сведению', 'ok'] };
 
@@ -106,14 +124,14 @@ function renderAnalysis(analysis) {
     parts.push(el('h4', 'Что сделать', 'mt-3'), ol);
   }
   const when = new Date(analysis.generatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  parts.push(el('p', `Модель ${analysis.model} · ${when}${analysis.cached ? ' · недавний разбор, повтор — через минуту' : ''}`
+  parts.push(el('p', `Модель ${analysis.model} · ${when}${analysis.cached ? ' · это недавний разбор' : ''}`
     + ' · по обезличенной сводке за сутки. Это подсказка: проверяйте выводы по цифрам ниже.', 'text-secondary small mt-3 mb-0'));
   box.replaceChildren(...parts);
 }
 
 function renderStatus(status) {
-  const runButton = $('ai-run');
-  runButton.disabled = running || !status.isConfigured;
+  configured = status.isConfigured;
+  if (!running) waitBeforeNew(status.retryInSeconds ?? 0);
   $('ai-status').textContent = status.isConfigured
     ? (status.last ? '' : can('Manager')
       ? `Подключена модель ${status.model}. Нажмите «Разобрать с ИИ» — облачная модель отвечает за 10–60 секунд, своя без видеокарты — за несколько минут.`
@@ -136,8 +154,7 @@ export function initInsights() {
   $('ai-run').addEventListener('click', async () => {
     if (running) return;
     running = true;
-    $('ai-run').disabled = true;
-    $('ai-run-text').textContent = 'ИИ разбирает…';
+    renderButton();
     $('ai-status').textContent = 'Собираем сводку и ждём ответ модели: облачная — 10–60 секунд, своя без видеокарты — до нескольких минут.';
     try {
       renderAnalysis(await api('/api/admin/ai/analysis', { method: 'POST' }));
@@ -147,8 +164,8 @@ export function initInsights() {
       toast(problemText(e), 'bad');
     } finally {
       running = false;
-      $('ai-run').disabled = false;
-      $('ai-run-text').textContent = 'Разобрать с ИИ';
+      // сразу узнаём у сервера, когда можно следующий разбор (обычно через минуту)
+      try { renderStatus(await api('/api/admin/ai/status')); } catch { renderButton(); }
     }
   });
 }

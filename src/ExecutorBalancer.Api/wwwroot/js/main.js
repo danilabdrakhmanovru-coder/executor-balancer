@@ -27,7 +27,7 @@ const TABS = {
   executors: { refresh: refreshExecutors, every: 5000 },
   profile: { refresh: () => refreshProfile(profileId), every: 5000 },
   analytics: { refresh: refreshAnalytics, every: 15000 },
-  insights: { refresh: refreshInsights, every: 15000 },
+  insights: { refresh: refreshInsights, every: 5000 },
   constructor: {
     refresh: async () => {
       await refreshConstructor();
