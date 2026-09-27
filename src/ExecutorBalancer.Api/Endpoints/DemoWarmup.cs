@@ -14,8 +14,8 @@ public sealed class DemoWarmup(IServiceScopeFactory scopes, IOptions<DemoOptions
     : BackgroundService
 {
     public const int ExecutorsPerDepartment = 10;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
-    private const int MaxAttempts = 36; // три минуты
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(10);
+    private const int MaxAttempts = 180; // полчаса: эмулятор могут поднять позже основного сервиса
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

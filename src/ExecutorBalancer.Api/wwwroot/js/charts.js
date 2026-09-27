@@ -38,6 +38,7 @@ function scale(value) {
 function frame(container, height) {
   const width = Math.max(280, container.clientWidth || 600);
   const svg = node('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', class: 'svg-chart' });
+  container.classList.remove('is-empty');
   container.replaceChildren(svg);
   return { svg, width };
 }
@@ -46,6 +47,8 @@ function empty(container, message) {
   const p = document.createElement('p');
   p.className = 'chart-empty';
   p.textContent = message;
+  // пустой график не держит высоту под оси — одна строка вместо пустого поля в полэкрана
+  container.classList.add('is-empty');
   container.replaceChildren(p);
 }
 

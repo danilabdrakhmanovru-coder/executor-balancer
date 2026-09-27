@@ -1,12 +1,45 @@
 // Обзор: плитки, живой график, нагрузка исполнителей и лента назначений.
-import { api } from './api.js';
-import { $, el, row, badge, fmt, fmtTime, deviation, emptyRow, tile } from './dom.js';
+import { api, problemText } from './api.js';
+import { $, el, row, badge, button, fmt, fmtTime, deviation, emptyRow, tile, toast } from './dom.js';
 import { columns } from './charts.js';
 import { KIND, renderExplanation } from './explain.js';
 import { showCheck } from './preview.js';
 
 let lastFeedId = 0;
 let liveLoadedAt = 0;
+let demoEnabled = false;
+
+export function setOverviewDemo(enabled) {
+  demoEnabled = enabled;
+}
+
+/** Пустой отдел: не тупик, а подсказка, откуда берутся сотрудники, и кнопки, чтобы их завести. */
+function noExecutorsRow() {
+  const tr = emptyRow(7, demoEnabled
+    ? 'В этом отделе пока нет сотрудников. Заведите тестовых или загрузите список из файла.'
+    : 'В этом отделе пока нет сотрудников: их передаёт АИС, либо загрузите список из файла.');
+  const bar = el('div', null, 'empty-actions');
+  if (demoEnabled) {
+    const seed = button('Завести 10 тестовых сотрудников', async () => {
+      seed.disabled = true;
+      try {
+        await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: 10 } });
+        toast('Тестовые сотрудники заведены');
+        await refreshOverview();
+      } catch (e) {
+        toast(`Не удалось: ${problemText(e)}`, 'bad');
+        seed.disabled = false;
+      }
+    }, 'btn btn-sm btn-primary', 'users');
+    bar.append(seed);
+  }
+  const file = el('a', null, 'btn btn-sm');
+  file.href = '#executors';
+  file.append('Загрузить из файла');
+  bar.append(file);
+  tr.firstChild.append(bar);
+  return tr;
+}
 
 function renderTiles(t, fairness) {
   const mean = fairness?.meanAbsDeviationPercent;
@@ -53,7 +86,7 @@ export function todayCell(e) {
 
 function renderExecutors(executors) {
   if (!executors.length) {
-    $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС'));
+    $('executors').replaceChildren(noExecutorsRow());
     return;
   }
   const max = Math.max(1, ...executors.filter((e) => e.isActive).map((e) => e.relativeLoad));

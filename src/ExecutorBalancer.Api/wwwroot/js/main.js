@@ -1,7 +1,7 @@
 // Точка входа: вход, отдел, вкладки, периодическое обновление активной вкладки.
 import { api, onUnauthorized, problemText } from './api.js';
 import { $ } from './dom.js';
-import { initOverview, refreshOverview, resetOverview } from './overview.js';
+import { initOverview, refreshOverview, resetOverview, setOverviewDemo } from './overview.js';
 import { initAnalytics, refreshAnalytics, exportLink } from './analytics.js';
 import { initConstructor, refreshConstructor, currentConfig } from './constructor.js';
 import { buildPreviewForm, fillSample } from './preview.js';
@@ -108,6 +108,7 @@ async function showApp() {
   // пульт демонстрации включается настройкой Demo:Enabled; выключен — вкладки нет
   demoEnabled = await api('/api/admin/demo/status').then(() => true, (e) => e.status === 502);
   setExecutorsEditable(demoEnabled);
+  setOverviewDemo(demoEnabled);
   setProfileEditable(demoEnabled);
   setStartDemo(demoEnabled);
   setDepartmentsDemo(demoEnabled);
