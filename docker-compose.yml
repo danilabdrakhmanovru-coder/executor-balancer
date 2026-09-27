@@ -42,11 +42,12 @@ services:
       ConnectionStrings__Redis: redis:6379,password=${REDIS_PASSWORD}
       Integration__ApiKey: ${INTEGRATION_API_KEY:?задайте INTEGRATION_API_KEY в .env}
       Admin__Password: ${ADMIN_PASSWORD:?задайте ADMIN_PASSWORD в .env}
-      Ais__BaseUrl: http://ais:8080
+      # адрес АИС, куда уходят назначения: в бою — настоящая АИС, на демонстрации — эмулятор
+      Ais__BaseUrl: ${AIS_BASE_URL:-http://ais:8080}
       Ais__ApiKey: ${AIS_API_KEY:?задайте AIS_API_KEY в .env}
       Swagger__Enabled: ${SWAGGER_ENABLED:-false}
-      # пульт демонстрации: управление эмулятором АИС из интерфейса; в бою — false
-      Demo__Enabled: ${DEMO_ENABLED:-true}
+      # демо-режим: вкладка «Тестовый стенд» и управление эмулятором АИС из интерфейса; в бою — выключен
+      Demo__Enabled: ${DEMO_ENABLED:-false}
     ports:
       - "127.0.0.1:8080:8080"
     read_only: true
@@ -58,7 +59,10 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # эмулятор АИС — только для демонстрации: запускается с профилем demo
+  # (docker compose --profile demo up, или COMPOSE_PROFILES=demo в .env)
   ais:
+    profiles: ["demo"]
     build:
       context: .
       dockerfile: src/AisEmulator.Api/Dockerfile

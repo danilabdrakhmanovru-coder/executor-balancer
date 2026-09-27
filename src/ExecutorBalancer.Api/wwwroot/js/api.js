@@ -30,14 +30,16 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+/** raw — файл как есть (ArrayBuffer), например CSV для загрузки сотрудников; иначе body уходит JSON. */
+export async function api(path, { method = 'GET', body, raw } = {}) {
   const headers = { [CSRF_HEADER]: CSRF_VALUE };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (raw !== undefined) headers['Content-Type'] = 'text/csv';
+  else if (body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(scoped(path), {
     method,
     credentials: 'same-origin',
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body),
   });
   if (response.status === 401 && path !== '/api/auth/login') {
     unauthorizedHandler();

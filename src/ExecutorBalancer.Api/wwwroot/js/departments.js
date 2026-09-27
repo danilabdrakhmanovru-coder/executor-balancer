@@ -1,12 +1,16 @@
 // Настройки → Отделы: список, создание со сферой (шаблоном), переименование, удаление пустого отдела.
 // Каждый отдел — отдельное пространство: свои параметры, правила, сотрудники, заявки и отчёты.
 import { api, problemText } from './api.js';
-import { $, el, row, badge, button, actions, fmt, toast, field, input, select, emptyRow } from './dom.js';
+import { $, el, row, badge, button, actions, fmt, toast, field, input, select, emptyRow, checkbox } from './dom.js';
 import { openEditor } from './editor.js';
 import { sphereBuilder } from './sphere.js';
 import { allDepartments, currentDepartment, loadDepartments, selectDepartment } from './department.js';
 
 const MAIN_ID = 1;
+let demoEnabled = false;
+
+/** В демо-режиме новый отдел можно сразу наполнить тестовыми сотрудниками через эмулятор АИС. */
+export function setDepartmentsDemo(enabled) { demoEnabled = enabled; }
 let presets = [];
 
 async function presetList() {
@@ -52,6 +56,7 @@ async function create() {
     ['', 'Пустой — настрою параметры сам']], list[0]?.id ?? '');
   const code = input('text', '', { maxlength: '32', placeholder: 'подберётся сам' });
   const builder = sphereBuilder();
+  const seed = checkbox(true, 'Сразу завести 10 тестовых сотрудников (демо-режим)');
   const builderBox = el('div', null, 'hidden');
   builderBox.append(...builder.nodes);
   sphere.addEventListener('change', () => builderBox.classList.toggle('hidden', sphere.value !== CUSTOM));
@@ -61,6 +66,7 @@ async function create() {
     field('Название', name),
     field('Сфера', sphere, 'Готовый набор параметров, правил и весов — потом его можно дополнить в «Параметрах и правилах».'),
     builderBox,
+    ...(demoEnabled ? [seed.wrap] : []),
     field('Код для АИС', code, 'Латинские буквы, цифры, «-» и «_». По нему АИС отправляет заявки отдела.'),
   ], async () => {
     const custom = sphere.value === CUSTOM;
@@ -73,8 +79,13 @@ async function create() {
         sphere: custom ? builder.read() : null,
       },
     });
-    toast(`Отдел «${created.name}» создан и открыт`);
     await selectDepartment(created.id);
+    if (demoEnabled && seed.box.checked) {
+      // запрос уже идёт в рамках нового отдела — он выбран в шапке
+      await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: 10 } })
+        .catch((e) => toast(`Отдел создан, но сотрудники не заведены: ${problemText(e)}`, 'bad'));
+    }
+    toast(`Отдел «${created.name}» создан и открыт`);
   }, refreshDepartments);
 }
 

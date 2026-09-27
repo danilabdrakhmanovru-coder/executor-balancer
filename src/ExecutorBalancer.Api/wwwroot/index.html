@@ -47,6 +47,7 @@
           <span id="department-sphere" class="dept-sphere d-none d-lg-inline"></span>
         </div>
         <div class="navbar-nav flex-row ms-auto align-items-center gap-2">
+          <span id="demo-badge" class="badge bg-orange-lt demo-badge hidden" title="Включены тестовый стенд и эмулятор АИС. В боевом запуске (DEMO_ENABLED=false) их нет">демо-режим</span>
           <span id="updated" class="text-secondary small d-none d-md-inline"></span>
           <button id="theme" class="btn btn-icon btn-ghost-secondary" type="button" title="Светлая или тёмная тема" aria-label="Тема">
             <svg class="icon theme-dark"><use href="icons.svg#moon"></use></svg>
@@ -102,7 +103,7 @@
                     <dl class="roles">
                       <dt>Клиент</dt><dd>оставляет обращение во внешней системе компании (АИС: CRM, учётная система).</dd>
                       <dt>АИС</dt><dd>сразу передаёт заявку и данные сотрудников сюда, получает назначение и показывает его сотруднику.
-                        На демонстрации её заменяет «Тестовый стенд».</dd>
+                        <span class="demo-only hidden">На демонстрации её заменяет «Тестовый стенд».</span></dd>
                       <dt>Этот сервис</dt><dd>за доли секунды выбирает сотрудника по правилам отдела и нагрузке и объясняет выбор.</dd>
                       <dt>Сотрудник</dt><dd>работает с заявкой в АИС: решает, отклоняет или отправляет на доработку.</dd>
                       <dt>Руководитель — вы</dt><dd>настраиваете правила отдела, следите за распределением, смотрите аналитику и рейтинг.</dd>
@@ -254,7 +255,11 @@
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
               <p class="page-hint mb-0">Сотрудники отдела, которых передала АИС: что умеют (параметры отдела), насколько загружены и
                 сколько получили сегодня. Щёлкните по имени — откроется страница сотрудника.</p>
-              <button id="executor-add" class="btn btn-primary hidden" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить сотрудника</button>
+              <div class="btn-list">
+                <a id="executor-template" class="btn" href="/api/admin/executors/template.csv" download title="Файл для Excel: колонки по параметрам отдела и текущие сотрудники"><svg class="icon"><use href="icons.svg#download"></use></svg>Скачать шаблон</a>
+                <button id="executor-import" class="btn" type="button"><svg class="icon"><use href="icons.svg#upload"></use></svg>Загрузить из файла</button>
+                <button id="executor-add" class="btn btn-primary hidden" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить сотрудника</button>
+              </div>
             </div>
             <div id="executors-list" class="executors-grid"></div>
           </section>
@@ -282,7 +287,7 @@
               <div class="col-xl-7">
                 <div class="card h-100">
                   <div class="card-header">
-                    <h3 class="card-title">Исполнители</h3>
+                    <h3 class="card-title">Сотрудники</h3>
                     <div class="card-actions text-secondary">полоса — открытый вес на единицу квалификации</div>
                   </div>
                   <div class="table-responsive scroll">
@@ -609,7 +614,7 @@
       <div id="editor-body" class="form-grid"></div>
       <p id="editor-error" class="text-danger mt-3 mb-0"></p>
       <div class="dialog-actions">
-        <button type="submit" id="editor-save" class="btn btn-primary"><svg class="icon"><use href="icons.svg#check"></use></svg>Сохранить</button>
+        <button type="submit" id="editor-save" class="btn btn-primary"><svg class="icon"><use href="icons.svg#check"></use></svg><span id="editor-save-text">Сохранить</span></button>
       </div>
     </form>
   </dialog>

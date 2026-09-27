@@ -6,8 +6,9 @@ let submitHandler = null;
 let afterSave = null;
 
 /** onSubmit сохраняет; после успеха диалог закрывается и вызывается after (например, перерисовка списка). */
-export function openEditor(title, nodes, onSubmit, after) {
+export function openEditor(title, nodes, onSubmit, after, { submitText = 'Сохранить' } = {}) {
   $('editor-title').textContent = title;
+  $('editor-save-text').textContent = submitText;
   $('editor-body').replaceChildren(...nodes);
   $('editor-error').textContent = '';
   submitHandler = onSubmit;

@@ -80,6 +80,7 @@ code { font-size: 12px; }
 .table td { white-space: nowrap; }
 th.wide { width: 28%; }
 td.empty-cell { text-align: center; padding: 22px; white-space: normal; color: var(--muted); }
+.empty-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; }
 .wrap-text { display: block; white-space: normal; min-width: 180px; max-width: 640px; overflow-wrap: anywhere; }
 tbody tr.clickable { cursor: pointer; }
 tr.inactive td { color: var(--muted); }
@@ -116,6 +117,10 @@ tr.fresh { animation: flash 1.2s ease-out; }
 }
 .chart { min-height: 220px; color: var(--muted); }
 .chart-small { min-height: 160px; }
+/* страница всегда длиннее окна: прокрутка до низа есть, даже когда в отделе ещё нет данных */
+#app .page-wrapper { min-height: 100vh; }
+.chart.is-empty { min-height: 0; }
+.chart.is-empty .chart-empty { margin: 4px 0; }
 .chart-empty { color: var(--muted); font-size: 13px; margin: 24px 0; text-align: center; }
 .svg-chart { width: 100%; height: auto; display: block; overflow: visible; font-variant-numeric: tabular-nums; }
 .svg-chart .grid { stroke: var(--chart-grid); stroke-width: 1; }
@@ -322,3 +327,7 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .medal-3 { background: #d9a172; color: #3b2210; }
 .place { color: var(--muted); }
 .group-row td { background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; }
+
+.demo-badge { font-weight: 600; letter-spacing: .02em; }
+
+.import-preview { max-height: 45vh; overflow: auto; }

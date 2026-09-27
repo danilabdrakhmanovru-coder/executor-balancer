@@ -1,7 +1,7 @@
 // Точка входа: вход, отдел, вкладки, периодическое обновление активной вкладки.
 import { api, onUnauthorized, problemText } from './api.js';
 import { $ } from './dom.js';
-import { initOverview, refreshOverview, resetOverview } from './overview.js';
+import { initOverview, refreshOverview, resetOverview, setOverviewDemo } from './overview.js';
 import { initAnalytics, refreshAnalytics, exportLink } from './analytics.js';
 import { initConstructor, refreshConstructor, currentConfig } from './constructor.js';
 import { buildPreviewForm, fillSample } from './preview.js';
@@ -12,7 +12,7 @@ import { refreshExecutors, setExecutorsEditable, initExecutors } from './executo
 import { refreshProfile, setProfileEditable } from './profile.js';
 import { renderPresets } from './presets.js';
 import { initDepartments, loadDepartments } from './department.js';
-import { initDepartmentsAdmin, refreshDepartments } from './departments.js';
+import { initDepartmentsAdmin, refreshDepartments, setDepartmentsDemo } from './departments.js';
 import { initMotivation, refreshMotivation } from './motivation.js';
 import { refreshStart, setStartDemo } from './start.js';
 import { initOrders, refreshOrders } from './orders.js';
@@ -108,9 +108,14 @@ async function showApp() {
   // пульт демонстрации включается настройкой Demo:Enabled; выключен — вкладки нет
   demoEnabled = await api('/api/admin/demo/status').then(() => true, (e) => e.status === 502);
   setExecutorsEditable(demoEnabled);
+  setOverviewDemo(demoEnabled);
   setProfileEditable(demoEnabled);
   setStartDemo(demoEnabled);
+  setDepartmentsDemo(demoEnabled);
   $('tab-button-demo').classList.toggle('hidden', !demoEnabled);
+  // демо-режим виден сразу: значок в шапке и пояснения про тестовый стенд; в бою их нет
+  $('demo-badge').classList.toggle('hidden', !demoEnabled);
+  for (const node of document.querySelectorAll('.demo-only')) node.classList.toggle('hidden', !demoEnabled);
   show(location.hash.slice(1));
 }
 

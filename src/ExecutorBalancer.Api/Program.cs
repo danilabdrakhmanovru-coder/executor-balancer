@@ -34,6 +34,8 @@ builder.Services.AddScoped<ApiKeyFilter>();
 builder.Services.AddAdminAuth(builder.Configuration);
 builder.Services.AddApplication(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
+// после миграций и восстановления Redis (StartupInitializer): в демо заполняет пустые отделы, в бою сразу завершается
+builder.Services.AddHostedService<DemoWarmup>();
 
 var app = builder.Build();
 

@@ -185,7 +185,69 @@ public sealed class OrderBalancer(
             throw new InvalidInputException(errors);
         }
 
-        var executor = await db.Executors.FirstOrDefaultAsync(e => e.Id == incoming.Id, cancellationToken);
+        var (executor, wasActive, moved) = Apply(departmentId, incoming,
+            await db.Executors.FirstOrDefaultAsync(e => e.Id == incoming.Id, cancellationToken));
+        await db.SaveChangesAsync(cancellationToken);
+
+        await loadStore.SetActiveAsync(executor.Id, executor.IsActive, cancellationToken);
+        await loadStore.BumpConfigVersionAsync(cancellationToken);
+        directory.Invalidate();
+
+        if ((wasActive && !executor.IsActive) || moved)
+        {
+            await ReassignOpenOrdersAsync(executor.Id, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Пакетная загрузка сотрудников отдела (из файла): одна транзакция вместе с записью журнала, одна новая
+    /// версия конфигурации. Данные уже проверены по справочнику. Ушедшие с работы и переведённые из других
+    /// отделов отдают свои открытые заявки коллегам — как при обычной передаче из АИС.
+    /// </summary>
+    public async Task ImportExecutorsAsync(int departmentId, IReadOnlyList<IncomingExecutor> incoming, AuditEntry audit,
+        CancellationToken cancellationToken)
+    {
+        var ids = incoming.Select(e => e.Id).ToList();
+        var existing = await db.Executors.Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, cancellationToken);
+        var released = new List<long>();
+        var saved = new List<Executor>();
+        foreach (var item in incoming)
+        {
+            var (executor, wasActive, moved) = Apply(departmentId, item, existing.GetValueOrDefault(item.Id));
+            saved.Add(executor);
+            if ((wasActive && !executor.IsActive) || moved)
+            {
+                released.Add(executor.Id);
+            }
+        }
+
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            db.AuditEntries.Add(audit);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        foreach (var executor in saved)
+        {
+            await loadStore.SetActiveAsync(executor.Id, executor.IsActive, cancellationToken);
+        }
+
+        await loadStore.BumpConfigVersionAsync(cancellationToken);
+        directory.Invalidate();
+        foreach (var id in released)
+        {
+            await ReassignOpenOrdersAsync(id, cancellationToken);
+        }
+
+        logger.LogInformation("Загружено сотрудников в отдел {DepartmentId}: {Count}", departmentId, incoming.Count);
+    }
+
+    /// <summary>Переносит данные из АИС или файла в сущность; новая — добавляется в контекст.</summary>
+    private (Executor Executor, bool WasActive, bool Moved) Apply(int departmentId, IncomingExecutor incoming,
+        Executor? existing)
+    {
+        var executor = existing;
         if (executor is null)
         {
             executor = new Executor { Id = incoming.Id, DepartmentId = departmentId };
@@ -211,16 +273,7 @@ public sealed class OrderBalancer(
 
         executor.AttributesJson = JsonSerializer.Serialize(incoming.Attributes);
         executor.UpdatedAt = clock.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
-
-        await loadStore.SetActiveAsync(executor.Id, executor.IsActive, cancellationToken);
-        await loadStore.BumpConfigVersionAsync(cancellationToken);
-        directory.Invalidate();
-
-        if ((wasActive && !executor.IsActive) || moved)
-        {
-            await ReassignOpenOrdersAsync(executor.Id, cancellationToken);
-        }
+        return (executor, wasActive, moved);
     }
 
     /// <summary>Открытые заявки деактивированного исполнителя уходят другим.</summary>
