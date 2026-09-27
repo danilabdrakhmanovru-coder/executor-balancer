@@ -92,6 +92,32 @@ public class MidHourLimitTests : IAsyncLifetime
         Assert.Equal(0m, report.Fairness.MaxAbsDeviationPercent);
     }
 
+    /// <summary>
+    /// Первый набрал лимит в первой пятиминутке, а потом получил ещё заявку от родителя. Эталон не должен отдать
+    /// ему свободных заявок больше, чем помещается под потолком вместе с этой будущей заявкой.
+    /// </summary>
+    [Fact]
+    public async Task CapLeavesRoomForLaterPinnedWeight()
+    {
+        await _f.AddExecutor(1, dailyLimit: 11);
+        await _f.AddExecutor(2);
+
+        var hour = ExecutorStats.HourOf(DateTimeOffset.UtcNow) - 2;
+        await _f.Query(async db =>
+        {
+            db.ExecutorHourStats.AddRange(Row(hour, 1, 11, forced: 1), Row(hour, 2, 30));
+            db.EligibilityHourStats.AddRange(
+                Pool(hour, 0, "1,2", 20), Pool(hour, 0, "2", 10),
+                Pool(hour, 2, "=1", 1), Pool(hour, 2, "2", 10));
+            return await db.SaveChangesAsync();
+        });
+
+        var report = await _f.Analytics(AnalyticsPeriod.Day);
+
+        Assert.Equal(11m, Math.Round(report.Executors.Single(e => e.Id == 1).FairWeight, 3));
+        Assert.Equal(0m, report.Fairness.MaxAbsDeviationPercent);
+    }
+
     private static ExecutorHourStat Row(long hour, long executor, int weight, int forced = 0) => new()
     {
         BucketHour = hour, ExecutorId = executor, DepartmentId = D, AssignedCount = weight, AssignedWeight = weight,

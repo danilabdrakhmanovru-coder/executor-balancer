@@ -269,6 +269,7 @@ public sealed class AnalyticsService(
         var unplaced = forced.ToDictionary(f => f.Key,
             f => Math.Max(0, f.Value - pinned.Where(x => x.Executor == f.Key).Sum(x => x.Pool.Weight)));
         var load = new Dictionary<long, decimal>();
+        var added = new Dictionary<long, decimal>();
         foreach (var slot in groups.Select(p => p.Slot).Concat(pinned.Select(x => x.Pool.Slot)).Distinct().Order())
         {
             var slotGroups = groups.Where(p => p.Slot == slot).ToList();
@@ -276,16 +277,21 @@ public sealed class AnalyticsService(
             foreach (var (id, weight) in unplaced)
             {
                 load[id] = load.GetValueOrDefault(id) + weight * share;
+                added[id] = added.GetValueOrDefault(id) + weight * share;
             }
 
             foreach (var (pool, id) in pinned.Where(x => x.Pool.Slot == slot))
             {
                 load[id!.Value] = load.GetValueOrDefault(id.Value) + pool.Weight;
+                added[id.Value] = added.GetValueOrDefault(id.Value) + pool.Weight;
             }
 
+            // потолок — полный вес за час: оставляем место под назначения без выбора, которые придут позже
+            var slotCaps = caps.ToDictionary(c => c.Key,
+                c => c.Value - Math.Max(0, forced.GetValueOrDefault(c.Key) - added.GetValueOrDefault(c.Key)));
             load = FairShare.Allocate(
                 slotGroups.GroupBy(p => p.SetKey).Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight))),
-                qualification, load, caps);
+                qualification, load, slotCaps);
         }
 
         return load;
