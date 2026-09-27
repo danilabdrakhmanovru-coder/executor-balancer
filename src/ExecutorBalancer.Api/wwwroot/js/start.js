@@ -53,7 +53,7 @@ export async function refreshStart() {
     step(2, 'send', 'АИС → сервис', 'Заявка приходит сюда', fmt(t.orders), 'всего заявок в отделе', '#orders'),
     step(3, 'list-check', 'сервис', 'Правила отбирают подходящих', `${fmt(rules)} правил`,
       'кто умеет и имеет допуск; разбор — «Проверка заявки»', '#preview'),
-    step(4, 'route', 'сервис', 'Выбирается наименее загруженный', fmt(t.assignedToday),
+    step(4, 'route', 'сервис', 'Выбирается тот, кто получил меньше', fmt(t.assignedToday),
       t.pending > 0 ? `назначено сегодня · ждут: ${fmt(t.pending)}` : 'назначено сегодня · никто не ждёт', '#overview'),
     step(5, 'briefcase', 'сотрудник', 'Сотрудник работает в АИС', fmt(t.open),
       t.undelivered > 0 ? `в работе · в пути в АИС: ${fmt(t.undelivered)}` : 'в работе; доработка возвращает к нему же', '#executors'),

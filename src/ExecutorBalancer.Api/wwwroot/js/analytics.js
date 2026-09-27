@@ -143,7 +143,7 @@ export async function refreshAnalytics() {
   // пустые интервалы до первой активности не показываем — иначе половина графика пустая
   let first = report.timeline.findIndex((p) => p.assigned || p.closed || p.returned);
   if (first < 0) first = report.timeline.length;
-  const timeline = report.timeline.slice(Math.max(0, Math.min(first - 1, report.timeline.length - 6)));
+  const timeline = report.timeline.slice(Math.max(0, Math.min(first - 1, report.timeline.length - 3)));
   groupedColumns($('an-timeline'), timeline.map((p) => label(p, report.bucketHours)), [
     { name: 'назначено', cls: 'series-a', values: timeline.map((p) => p.assigned) },
     { name: 'решено и отклонено', cls: 'series-b', values: timeline.map((p) => p.closed) },
@@ -154,7 +154,7 @@ export async function refreshAnalytics() {
   })));
   const k = report.kinds;
   bars($('an-kinds'), [
-    { label: 'выбор алгоритма', value: k.primary, hint: 'наименее загруженный из подходящих' },
+    { label: 'выбор алгоритма', value: k.primary, hint: 'кто из подходящих получил меньше за этот час' },
     { label: 'перераспределены', value: k.reassign, hint: 'прежний сотрудник ушёл или не подходит' },
     { label: 'от родительской', value: k.parent, hint: 'тому, кто ведёт родительскую заявку' },
     { label: 'после доработки', value: k.secondary, hint: 'вернулась к тому же сотруднику' },

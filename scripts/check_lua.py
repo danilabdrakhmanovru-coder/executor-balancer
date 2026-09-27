@@ -7,7 +7,8 @@ def script(name):
 PICK,REL=script('PickScript'),script('ReleaseScript')
 r=redis.Redis(port=int(__import__('os').environ.get('REDIS_PORT', '6379')),decode_responses=True); r.flushall()
 pick=r.register_script(PICK); rel=r.register_script(REL)
-K=lambda oid,day="20260928":["{eb}:open-weight","{eb}:open-count","{eb}:daily:"+day,"{eb}:active","{eb}:order:%d"%oid]
+HOUR="{eb}:hour-weight:494000"
+K=lambda oid,day="20260928":["{eb}:open-weight","{eb}:open-count","{eb}:daily:"+day,"{eb}:active","{eb}:order:%d"%oid,HOUR]
 def P(oid,w,cands,reopen=0,rr=r,count=1):
     args=[w,reopen,259200,count]
     # четвёрки: id, квалификация, норма, потолок «больше нормы» (по умолчанию — как норма)
@@ -24,7 +25,7 @@ r.flushall(); [r.hset("{eb}:active",i,1) for i in (3,7)]
 t=P(1,1000,[(3,1000,-1),(7,1000,-1)]); assert t[1]=='3', t
 # inactive + limit
 r.hset("{eb}:active",7,0)
-t=P(2,1000,[(3,1000,1),(7,1000,-1)]); print("none",t); assert t[0]=='none' and '3|daily_limit_exceeded|1000|1' in t and '7|inactive|0|0' in t
+t=P(2,1000,[(3,1000,1),(7,1000,-1)]); print("none",t); assert t[0]=='none' and '3|daily_limit_exceeded|1000|1|1000' in t and '7|inactive|0|0|0' in t
 # forced ignores limit (limit -1 passed)
 t=P(2,1000,[(3,1000,-1)]); assert t[0]=='assigned' and t[1]=='3'
 # release await, reopen
@@ -37,7 +38,9 @@ assert R(2,'closed')==1 and r.ttl("{eb}:order:2")>0
 daily_before=int(r.hget("{eb}:daily:20260928",3))
 t=P(9,1500,[(3,1000,-1)]); assert t[0]=='assigned' and t[2].isdigit(), t
 assert int(r.hget("{eb}:daily:20260928",3))==daily_before+1
+hour_before=int(r.hget(HOUR,3))
 assert R(9,'rolled-back',1)==1 and not r.exists("{eb}:order:9")
+assert int(r.hget(HOUR,3))==hour_before-1500   # откат возвращает и вес за час
 assert int(r.hget("{eb}:daily:20260928",3))==daily_before
 # existing returns executor and hold time
 e=P(2,1000,[(3,1000,-1)]); assert e[0]=='existing' and e[1]=='3' and e[2].isdigit(), e
@@ -63,8 +66,8 @@ assert max(per)-min(per)<=1
 # «больше нормы»: доброволец (норма 1, потолок 2) получает заявку, только когда у остальных норма набрана
 r.flushall(); [r.hset("{eb}:active",i,1) for i in (1,2)]
 t=P(1,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='1', t            # обычный выбор: оба ниже нормы
-t=P(2,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='2' and '1|over_norm|1000|1' in t, t   # 2 ещё не набрал норму
-t=P(3,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='1' and '2|daily_limit_exceeded|1000|1' in t, t  # излишек — добровольцу
+t=P(2,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='2' and '1|over_norm|1000|1|1000' in t, t   # 2 ещё не набрал норму
+t=P(3,1000,[(1,1000,1,2),(2,1000,1)]); assert t[1]=='1' and '2|daily_limit_exceeded|1000|1|1000' in t, t  # излишек — добровольцу
 t=P(4,1000,[(1,1000,1,2),(2,1000,1)]); assert t[0]=='none', t          # потолок набран
 # возврат с доработки к тому же исполнителю не засчитывается в суточную норму; откат ничего не возвращает
 r.flushall(); r.hset("{eb}:active",5,1)
@@ -72,4 +75,12 @@ t=P(1,1000,[(5,1000,-1)]); assert t[0]=='assigned' and r.hget("{eb}:daily:202609
 assert R(1,'await')==1
 t=P(1,1000,[(5,1000,-1)],reopen=1,count=0); assert t[0]=='assigned' and r.hget("{eb}:daily:20260928",5)=='1', t
 assert R(1,'rolled-back',1)==1 and r.hget("{eb}:daily:20260928",5)=='1'
+# главный критерий — вес за час: кто быстро закрывает, не получает больше других
+r.flushall(); [r.hset("{eb}:active",i,1) for i in (1,2)]
+C=[(1,1000,-1),(2,1000,-1)]
+assert P(1,1000,C)[1]=='1' and R(1,'closed')==1          # 1 закрыл сразу
+assert P(2,1000,C)[1]=='2'                              # 2 держит заявку в работе
+assert P(3,1000,C)[1]=='1' and R(3,'closed')==1          # поровну за час — у 1 пусто в работе
+assert P(4,1000,C)[1]=='2', 'по открытой нагрузке ушла бы к 1, по весу за час — к 2'
+assert r.hget(HOUR,"1")=='2000' and r.hget(HOUR,"2")=='2000' and r.ttl(HOUR)>0
 print("LUA OK")

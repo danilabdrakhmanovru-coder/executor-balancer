@@ -13,6 +13,27 @@ public class OrderBalancerTests : IAsyncLifetime
     public async Task DisposeAsync() => await _f.DisposeAsync();
 
     [Fact]
+    public async Task FastCloserDoesNotGetMoreThanFairShare()
+    {
+        await _f.AddExecutor(1);
+        await _f.AddExecutor(2);
+        var got = new Dictionary<long, int> { [1] = 0, [2] = 0 };
+        for (var i = 1; i <= 20; i++)
+        {
+            var result = await _f.Receive(i);
+            got[result.ExecutorId!.Value]++;
+            if (result.ExecutorId == 1)
+            {
+                await _f.ChangeStatus(i, OrderStatus.Accept); // первый закрывает сразу, у второго копится
+            }
+        }
+
+        // по открытой нагрузке первый получал бы почти всё; по полученному за час — поровну
+        Assert.Equal(10, got[1]);
+        Assert.Equal(10, got[2]);
+    }
+
+    [Fact]
     public async Task InactiveExecutorIsNotAssigned()
     {
         await _f.AddExecutor(1, active: false);

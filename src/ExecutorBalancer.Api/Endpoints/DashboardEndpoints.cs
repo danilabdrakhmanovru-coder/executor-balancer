@@ -112,7 +112,7 @@ public static class DashboardEndpoints
         var today = await analytics.BuildAsync(d.Id, AnalyticsPeriod.Today, ct);
         var deviations = today.Executors.ToDictionary(e => e.Id, e => e.DeviationPercent);
         var snapshot = await directory.GetAsync(d.Id, ct);
-        var current = await loads.GetLoadsAsync(balancer.Today(), ct);
+        var current = await loads.GetLoadsAsync(balancer.Today(), balancer.CurrentHour(), ct);
         var scores = await quality.GetAsync(d.Id, ct);
         var hourAgo = DateTimeOffset.UtcNow.AddHours(-1);
 
@@ -247,7 +247,7 @@ public static class DashboardEndpoints
         var department = await db.Departments.AsNoTracking().Where(x => x.Id == d.Id)
             .Select(x => new { x.Name, x.PresetId }).FirstAsync(ct);
         var updatedAt = await db.Executors.AsNoTracking().Where(x => x.Id == id).Select(x => x.UpdatedAt).FirstAsync(ct);
-        var load = (await loads.GetLoadsAsync(balancer.Today(), ct)).GetValueOrDefault(id) ?? new ExecutorLoad(0, 0, 0);
+        var load = (await loads.GetLoadsAsync(balancer.Today(), balancer.CurrentHour(), ct)).GetValueOrDefault(id) ?? new ExecutorLoad(0, 0, 0);
         var scores = await quality.GetAsync(d.Id, ct);
         var week = await analytics.BuildAsync(d.Id, AnalyticsPeriod.Week, ct);
         var weekMetrics = week.Executors.FirstOrDefault(m => m.Id == id);
