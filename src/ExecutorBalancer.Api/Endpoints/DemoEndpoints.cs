@@ -36,7 +36,7 @@ public sealed record DemoOrderRequest(long? ParentId, Dictionary<string, JsonEle
 /// </summary>
 public static class DemoEndpoints
 {
-    public const int MaxSeedCount = 50;
+    public const int MaxSeedCount = 100; // столько же принимает эмулятор АИС
     public const double MaxRatePerHour = 72_000;
     private const long IdsPerDepartment = 1000;
 

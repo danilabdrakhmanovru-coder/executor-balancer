@@ -62,7 +62,8 @@ public class SimulationTests
 
         Assert.Null(request.Validate());
         Assert.Equal([1L, 2L, 3L], executors.Select(e => e.Id));
-        Assert.Equal("Иванов И. 1", executors[0].FullName);
+        // имён меньше, чем сотрудников: первый круг без номера, дальше — с номером круга
+        Assert.Equal(["Иванов И.", "Петрова А.", "Иванов И. 2"], executors.Select(e => e.FullName));
         Assert.All(executors, e => Assert.True(e.Attributes.ContainsKey("subjects")));
         Assert.NotNull(new SeedExecutorsRequest(0, []).Validate());
         Assert.NotNull(new SeedExecutorsRequest(5, [], Qualifications: [500m]).Validate());

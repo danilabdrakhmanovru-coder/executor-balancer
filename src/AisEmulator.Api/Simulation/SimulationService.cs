@@ -316,7 +316,8 @@ public sealed record SeedExecutorsRequest(
         {
             Id = FirstId + n - 1,
             Department = Department,
-            FullName = names.Length >= Count ? names[n - 1] : $"{names[(n - 1) % names.Length]} {n}",
+            // имён меньше, чем сотрудников: первый круг — как есть, дальше с номером круга («Иванов И. 2»)
+            FullName = n <= names.Length ? names[n - 1] : $"{names[(n - 1) % names.Length]} {(n - 1) / names.Length + 1}",
             IsActive = true,
             DailyLimit = DailyLimits is { Length: > 0 } ? DailyLimits[random.Next(DailyLimits.Length)] : null,
             QualificationWeight = Qualifications is { Length: > 0 } ? Qualifications[random.Next(Qualifications.Length)] : 1m,

@@ -133,12 +133,21 @@ async function sendOrder() {
   }
 }
 
+const MAX_SEED = 100; // как DemoEndpoints.MaxSeedCount
+
 export function initDemo() {
-  const count = input('number', '15', { min: '1', max: '50', step: '1' });
-  $('demo-seed-count').replaceChildren(field('Сколько исполнителей', count));
+  const count = input('number', '15', { min: '1', max: String(MAX_SEED), step: '1', required: '' });
+  $('demo-seed-count').replaceChildren(field(`Сколько сотрудников будет в отделе (до ${MAX_SEED})`, count));
   $('demo-seed').addEventListener('click', async () => {
+    const n = Number(count.value);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_SEED) {
+      // не отправляем заведомо неверное число: сразу говорим, что не так
+      toast(`Число сотрудников — от 1 до ${MAX_SEED}`, 'bad');
+      count.focus();
+      return;
+    }
     try {
-      const created = await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: Number(count.value) || 15 } });
+      const created = await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: n } });
       toast(`В АИС заведено сотрудников отдела: ${created.length}. Навыки и лимиты — случайные по параметрам отдела.`);
       await refreshDemo();
     } catch (e) { toast(problemText(e), 'bad'); }
