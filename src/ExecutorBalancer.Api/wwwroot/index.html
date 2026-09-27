@@ -47,6 +47,7 @@
           <span id="department-sphere" class="dept-sphere d-none d-lg-inline"></span>
         </div>
         <div class="navbar-nav flex-row ms-auto align-items-center gap-2">
+          <span id="demo-badge" class="badge bg-orange-lt demo-badge hidden" title="Включены тестовый стенд и эмулятор АИС. В боевом запуске (DEMO_ENABLED=false) их нет">демо-режим</span>
           <span id="updated" class="text-secondary small d-none d-md-inline"></span>
           <button id="theme" class="btn btn-icon btn-ghost-secondary" type="button" title="Светлая или тёмная тема" aria-label="Тема">
             <svg class="icon theme-dark"><use href="icons.svg#moon"></use></svg>
@@ -102,7 +103,7 @@
                     <dl class="roles">
                       <dt>Клиент</dt><dd>оставляет обращение во внешней системе компании (АИС: CRM, учётная система).</dd>
                       <dt>АИС</dt><dd>сразу передаёт заявку и данные сотрудников сюда, получает назначение и показывает его сотруднику.
-                        На демонстрации её заменяет «Тестовый стенд».</dd>
+                        <span class="demo-only hidden">На демонстрации её заменяет «Тестовый стенд».</span></dd>
                       <dt>Этот сервис</dt><dd>за доли секунды выбирает сотрудника по правилам отдела и нагрузке и объясняет выбор.</dd>
                       <dt>Сотрудник</dt><dd>работает с заявкой в АИС: решает, отклоняет или отправляет на доработку.</dd>
                       <dt>Руководитель — вы</dt><dd>настраиваете правила отдела, следите за распределением, смотрите аналитику и рейтинг.</dd>

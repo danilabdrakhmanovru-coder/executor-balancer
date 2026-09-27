@@ -322,3 +322,5 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .medal-3 { background: #d9a172; color: #3b2210; }
 .place { color: var(--muted); }
 .group-row td { background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; }
+
+.demo-badge { font-weight: 600; letter-spacing: .02em; }

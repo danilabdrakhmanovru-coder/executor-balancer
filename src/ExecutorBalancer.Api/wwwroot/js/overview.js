@@ -53,7 +53,7 @@ export function todayCell(e) {
 
 function renderExecutors(executors) {
   if (!executors.length) {
-    $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС (на демонстрации — «Тестовый стенд»)'));
+    $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС'));
     return;
   }
   const max = Math.max(1, ...executors.filter((e) => e.isActive).map((e) => e.relativeLoad));

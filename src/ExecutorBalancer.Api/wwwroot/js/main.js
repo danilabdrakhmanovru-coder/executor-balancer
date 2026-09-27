@@ -111,6 +111,9 @@ async function showApp() {
   setProfileEditable(demoEnabled);
   setStartDemo(demoEnabled);
   $('tab-button-demo').classList.toggle('hidden', !demoEnabled);
+  // демо-режим виден сразу: значок в шапке и пояснения про тестовый стенд; в бою их нет
+  $('demo-badge').classList.toggle('hidden', !demoEnabled);
+  for (const node of document.querySelectorAll('.demo-only')) node.classList.toggle('hidden', !demoEnabled);
   show(location.hash.slice(1));
 }
 
