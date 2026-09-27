@@ -131,31 +131,39 @@ def main():
         except Exception:
             bump("errors")
 
+    def change_status(order_id, status):
+        try:
+            ais.call("POST", f"/api/ais/orders/{order_id}/status", {"status": status})
+            bump("back" if status == "processed" else status)
+        except Exception:
+            bump("errors")
+
     def worker_simulation():
-        # исполнители работают: часть назначенных заявок закрывается, часть уходит на доработку
-        while not stop.wait(1.0):
-            try:
-                orders = ais.call("GET", "/api/ais/orders?status=processed&assigned=true&limit=300")
-                now = time.time()
-                for order in orders:
-                    if rng.random() > 0.15:
-                        continue
-                    roll = rng.random()
-                    status = "accept" if roll < 0.65 else "reject" if roll < 0.75 else "await"
-                    ais.call("POST", f"/api/ais/orders/{order['id']}/status", {"status": status})
-                    bump(status)
-                    if status == "await":
-                        with lock:
-                            awaiting[order["id"]] = now + rng.uniform(5, 20)
-                with lock:
-                    due = [oid for oid, at in awaiting.items() if at <= now]
-                    for oid in due:
-                        del awaiting[oid]
-                for oid in due:
-                    ais.call("POST", f"/api/ais/orders/{oid}/status", {"status": "processed"})
-                    bump("back")
-            except Exception:
-                bump("errors")
+        # исполнители работают параллельно: часть назначенных заявок закрывается, часть уходит на доработку;
+        # смены статусов идут из нескольких потоков одновременно — как у живых сотрудников
+        with ThreadPoolExecutor(max_workers=8) as workers:
+            while not stop.wait(1.0):
+                try:
+                    orders = ais.call("GET", "/api/ais/orders?status=processed&assigned=true&limit=300")
+                    now = time.time()
+                    changes = []
+                    for order in orders:
+                        if rng.random() > 0.15:
+                            continue
+                        roll = rng.random()
+                        status = "accept" if roll < 0.65 else "reject" if roll < 0.75 else "await"
+                        changes.append((order["id"], status))
+                        if status == "await":
+                            with lock:
+                                awaiting[order["id"]] = now + rng.uniform(5, 20)
+                    with lock:
+                        due = [oid for oid, at in awaiting.items() if at <= now]
+                        for oid in due:
+                            del awaiting[oid]
+                    changes += [(oid, "processed") for oid in due]  # вернулась с доработки — вторичная заявка
+                    list(workers.map(lambda c: change_status(*c), changes))
+                except Exception:
+                    bump("errors")
 
     def chaos():
         if stop.wait(args.duration / 2):

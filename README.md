@@ -15,7 +15,7 @@ src/ExecutorBalancer.Infrastructure  EF Core, миграции, Redis + Lua, д�
 src/ExecutorBalancer.Api             HTTP API, дашборд (wwwroot), вход администратора, защита
 src/AisEmulator.Api                  эмулятор внешней АИС (назначение записывается с задержкой 2–10 с)
 tests/ExecutorBalancer.Tests         модульные тесты и тесты конкурентности
-tools/loadgen.py                     генератор нагрузки
+tools/loadgen.py                     генератор нагрузки: многопоточная подача заявок и смена статусов
 scripts/check_lua.py                 проверка Lua-скриптов на живом Redis
 docs/DECISIONS.md                    трактовки ТЗ и принятые решения
 docs/ARCHITECTURE.md                 BPMN, sequence-диаграмма, ERD, алгоритм и альтернативы

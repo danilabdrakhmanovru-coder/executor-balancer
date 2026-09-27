@@ -26,6 +26,8 @@ builder.Services.AddSingleton<AisStore>();
 builder.Services.AddSingleton<AisCommands>();
 builder.Services.AddSingleton<BalancerForwarder>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BalancerForwarder>());
+builder.Services.AddSingleton<OrderIdSync>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<OrderIdSync>());
 builder.Services.AddSingleton<SimulationService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SimulationService>());
 builder.Services.AddHttpClient(BalancerForwarder.HttpClientName, client =>
@@ -92,8 +94,10 @@ api.MapGet("/orders", (string? status, bool? assigned, int? limit, string? depar
 api.MapGet("/orders/{id:long}", (long id, AisStore store) =>
     store.GetOrder(id) is { } order ? Results.Ok(order) : Results.NotFound());
 
-api.MapPost("/orders", (OrderBody body, AisStore store, AisCommands commands) =>
+api.MapPost("/orders", async (OrderBody body, AisStore store, AisCommands commands, OrderIdSync ids, CancellationToken ct) =>
 {
+    await ids.EnsureAsync(ct); // после перезапуска — продолжить нумерацию балансировщика, а не с 1
+
     if (!AisCommands.IsValidDepartment(body.Department))
     {
         return BadDepartment();
