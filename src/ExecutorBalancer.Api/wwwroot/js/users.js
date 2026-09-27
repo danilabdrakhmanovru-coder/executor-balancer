@@ -65,6 +65,36 @@ function editor(user) {
   }, refreshUsers, { submitText: isNew ? 'Создать' : 'Сохранить' });
 }
 
+/**
+ * Сброс забытого пароля: новый случайный пароль показывается администратору один раз — он передаёт его человеку
+ * лично. Открытые сессии пользователя закрываются, в журнал пишется «пароль сменён» (сам пароль — нет).
+ */
+async function resetPassword(user) {
+  if (!confirm(`Сбросить пароль пользователя ${user.login}? Старый пароль перестанет работать, открытые сессии закроются.`)) return;
+  const password = generatePassword();
+  try {
+    await api(`/api/admin/users/${user.id}`, {
+      method: 'PUT',
+      body: { displayName: user.displayName, role: user.role, departmentIds: user.departmentIds, isActive: user.isActive, password },
+    });
+  } catch (e) {
+    toast(problemText(e), 'bad');
+    return;
+  }
+  const shown = input('text', password, { readonly: '', spellcheck: 'false' });
+  const copy = button('Скопировать', async () => {
+    try { await navigator.clipboard.writeText(password); toast('Пароль скопирован'); } catch { shown.select(); }
+  }, 'btn btn-sm', 'file-text');
+  const row = el('div', null, 'input-row');
+  row.append(shown, copy);
+  openEditor(`Новый пароль для ${user.login}`, [
+    el('p', 'Передайте пароль пользователю лично. После закрытия окна его больше нигде не будет видно: '
+      + 'в базе хранится только необратимый хеш.', 'hint'),
+    field('Пароль', row),
+  ], async () => {}, refreshUsers, { submitText: 'Готово' });
+  shown.select();
+}
+
 async function remove(user) {
   if (!confirm(`Удалить пользователя ${user.login}? Войти под ним больше будет нельзя; записи журнала сохранятся.`)) return;
   try {
@@ -87,6 +117,7 @@ export async function refreshUsers() {
     u.isActive ? badge('может входить', 'ok') : badge('заблокирован', 'bad'),
     u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : el('span', 'ещё не входил', 'text-secondary'),
     actions(button('Изменить', () => editor(u), 'btn btn-sm', 'pencil'),
+      button('Сбросить пароль', () => resetPassword(u), 'btn btn-sm', 'lock'),
       ...(u.login === session().login ? [] : [button('Удалить', () => remove(u), 'btn btn-sm btn-outline-danger', 'trash')])),
   ], u.isActive ? '' : 'inactive')) : [emptyRow(7, 'Других пользователей пока нет — добавьте руководителей и наблюдателей')]));
 }
