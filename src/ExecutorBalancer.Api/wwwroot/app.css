@@ -346,19 +346,23 @@ tr.fresh { animation: flash 1.2s ease-out; }
 
 /* ИИ-разбор */
 .ai-result:not(:empty) { margin-top: 4px; }
-.ai-summary { font-size: 15px; line-height: 1.55; margin-bottom: 0; }
-.ai-findings { display: grid; gap: 10px; }
-.ai-finding { padding: 10px 12px; border: 1px solid var(--tblr-border-color); border-radius: 8px; }
-.ai-finding-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
-.ai-recommendations { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
-
-/* роли: кнопки, которые вернули бы «нет прав», не показываются (права всё равно проверяет сервер) */
-body.role-viewer .need-manager, body:not(.role-admin) .need-admin { display: none !important; }
-.user-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.15; }
-.user-chip .user-name { display: block; color: var(--tblr-body-color); font-weight: 600; }
-.user-chip .user-role { display: block; font-size: 11px; }
-@media (max-width: 767.98px) { .user-chip > span { display: none; } }
-.check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 12px; }
-.input-row { display: flex; gap: 8px; align-items: center; }
-.roles-table td:not(:first-child), .roles-table th:not(:first-child) { text-align: center; }
-.read-only-note { color: var(--muted); font-size: 13px; }
+.ai-summary { font-size: 15px; line-height: 1.55; }
+.ai-section { margin-top: 18px; }
+.ai-section-title { display: flex; align-items: center; gap: 6px; font-size: 14px; margin-bottom: 8px; }
+.ai-finding { padding: 10px 12px; border: 1px solid var(--tblr-border-color); border-radius: 8px; display: grid; gap: 6px; }
+.ai-finding + .ai-finding { margin-top: 8px; }
+.ai-finding-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ai-why { font-size: 13px; }
+.ai-actions { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.ai-links { display: flex; flex-wrap: wrap; gap: 4px; }
+.ai-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; }
+.ai-print-head { display: none; }
+tr.row-highlight td { background: var(--tblr-yellow-lt, rgba(247, 183, 49, .18)); transition: background .3s; }
+/* печать отчёта: только карточка ИИ-разбора, без кнопок */
+@media print {
+  body.print-ai * { visibility: hidden; }
+  body.print-ai #ai-card, body.print-ai #ai-card * { visibility: visible; }
+  body.print-ai #ai-card { position: absolute; top: 0; left: 0; width: 100%; border: 0; box-shadow: none; }
+  body.print-ai #ai-run, body.print-ai .ai-report-tools, body.print-ai .ai-links { display: none !important; }
+  body.print-ai .ai-print-head { display: block; color: #555; }
+}

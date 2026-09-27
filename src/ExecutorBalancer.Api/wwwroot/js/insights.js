@@ -1,10 +1,13 @@
 // «Разбор заявок»: спрос и покрытие за сутки (считает сервер) и ИИ-разбор по этим цифрам.
 // Ответ модели — только текст: выводится через textContent, как и всё остальное.
 import { api, problemText } from './api.js';
-import { $, el, row, badge, fmt, emptyRow, tile, toast } from './dom.js';
+import { $, el, row, badge, button, fmt, emptyRow, tile, toast, icon } from './dom.js';
 import { can } from './session.js';
+import { currentDepartment } from './department.js';
 
 let fieldKey = null;
+let lastFields = [];
+let lastAnalysis = null;
 let running = false;
 let configured = false;
 let retryUntil = 0; // до этого момента новый разбор по отделу не запрашивается — модель отдала бы прежний
@@ -57,6 +60,7 @@ function tension(option) {
 }
 
 function renderFields(fields) {
+  lastFields = fields;
   const group = $('in-fields');
   if (!fields.length) {
     group.replaceChildren(el('span', 'У заявок отдела нет параметров-справочников — разрез не строится', 'text-secondary'));
@@ -72,7 +76,7 @@ function renderFields(fields) {
   }));
   const options = [...fields.find((f) => f.key === fieldKey).options]
     .sort((a, b) => b.orders - a.orders || a.executors - b.executors);
-  $('in-options').replaceChildren(...options.map((o) => row([
+  $('in-options').replaceChildren(...options.map((o) => withValue(o.value, row([
     o.label || o.value,
     o.orders ? `${fmt(o.orders)} (${fmt(o.sharePercent)}%)` : '0',
     o.waiting ? badge(fmt(o.waiting), 'warn') : '0',
@@ -80,7 +84,7 @@ function renderFields(fields) {
     fmt(o.executors),
     `${fmt(o.capacitySharePercent)}%`,
     tension(o),
-  ], o.orders === 0 ? 'inactive' : '')));
+  ], o.orders === 0 ? 'inactive' : ''))));
 }
 
 function renderLists(report) {
@@ -99,33 +103,162 @@ function renderLists(report) {
     : [emptyRow(2, 'Сейчас никто не ждёт')]));
 }
 
+/** Строка таблицы помнит своё значение — к ней ведёт ссылка из отчёта ИИ. */
+function withValue(value, tr) {
+  tr.dataset.value = value;
+  return tr;
+}
+
+/** Показать значение в «Спросе и покрытии»: нужный параметр, строка подсвечена. */
+function showDemand(key, value) {
+  if (!lastFields.some((f) => f.key === key)) return;
+  fieldKey = key;
+  renderFields(lastFields);
+  const tr = [...$('in-options').querySelectorAll('tr')].find((r) => r.dataset.value === value);
+  if (!tr) return;
+  tr.classList.add('row-highlight');
+  tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => tr.classList.remove('row-highlight'), 2500);
+}
+
+// разделы отчёта: название и иконка; порядок — как у находок (важное первым)
+const CATEGORY = {
+  skills: ['Навыки', 'users'], queue: ['Очередь', 'hourglass'], rules: ['Правила', 'adjustments'],
+  quality: ['Качество', 'star'], fairness: ['Справедливость', 'scale'], data: ['Данные', 'info-circle'],
+  ok: ['Всё в порядке', 'circle-check'],
+};
+const WHO = { руководитель: '', администратор: 'warn' };
+
+/** Текст, где «С-3023» — ссылка на страницу сотрудника. Только узлы и textContent — без разметки из ответа модели. */
+function linked(text, cls) {
+  const node = el('span', null, cls);
+  let last = 0;
+  for (const m of String(text ?? '').matchAll(/[СC]-(\d{1,12})/g)) {
+    node.append(text.slice(last, m.index));
+    const a = el('a', m[0]);
+    a.href = `#executor-${m[1]}`;
+    node.append(a);
+    last = m.index + m[0].length;
+  }
+  node.append(String(text ?? '').slice(last));
+  return node;
+}
+
+function actionItem(a) {
+  const li = el('li');
+  li.append(badge(a.who, WHO[a.who] ?? ''), ' ', linked(a.text));
+  if (a.effect) li.append(el('span', ` → ${a.effect}`, 'text-secondary'));
+  return li;
+}
+
+function findingCard(f) {
+  const [text, kind] = LEVEL[f.level] || LEVEL.medium;
+  const card = el('div', null, 'ai-finding');
+  const head = el('div', null, 'ai-finding-head');
+  head.append(badge(text, kind), el('strong', f.title));
+  card.append(head, linked(f.detail, 'd-block text-secondary'));
+  if (f.why) {
+    const why = el('p', null, 'ai-why mb-0');
+    why.append(el('span', 'Почему так может быть: ', 'fw-medium'), linked(f.why));
+    card.append(why);
+  }
+  if (f.actions.length) {
+    const ul = el('ul', null, 'ai-actions');
+    ul.append(...f.actions.map(actionItem));
+    card.append(ul);
+  }
+  const links = el('div', null, 'ai-links');
+  for (const id of f.executors) {
+    const a = el('a', null, 'btn btn-sm btn-ghost-primary');
+    a.href = `#executor-${id}`;
+    a.append(icon('user-circle'), `Страница С-${id}`);
+    links.append(a);
+  }
+  if (f.fieldKey) {
+    links.append(button('Показать в «Спросе и покрытии»', () => showDemand(f.fieldKey, f.value), 'btn btn-sm btn-ghost-primary', 'chart-bar'));
+  }
+  if (links.childElementCount) card.append(links);
+  return card;
+}
+
+/** Отчёт текстом — для копирования в чат или письмо. */
+function reportText(a) {
+  const when = new Date(a.generatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+  const lines = [`ИИ-разбор заявок · отдел «${currentDepartment()?.name ?? ''}» · ${when}`, '', a.summary, ''];
+  for (const f of a.findings) {
+    lines.push(`[${(LEVEL[f.level] || LEVEL.medium)[0]}] ${(CATEGORY[f.category] || CATEGORY.ok)[0]} — ${f.title}`, `  ${f.detail}`);
+    if (f.why) lines.push(`  Почему: ${f.why}`);
+    for (const x of f.actions) lines.push(`  — ${x.text} (кому: ${x.who}${x.effect ? `; что изменится: ${x.effect}` : ''})`);
+    lines.push('');
+  }
+  if (a.recommendations.length) {
+    lines.push('Общие действия:');
+    for (const x of a.recommendations) lines.push(`— ${x.text} (кому: ${x.who}${x.effect ? `; что изменится: ${x.effect}` : ''})`);
+  }
+  lines.push('', `Модель ${a.model}; находки и цифры посчитаны сервером, пояснения и действия — ИИ.`);
+  return lines.join('\n');
+}
+
+async function copyReport() {
+  if (!lastAnalysis) return;
+  try {
+    await navigator.clipboard.writeText(reportText(lastAnalysis));
+    toast('Отчёт скопирован — вставьте его в чат или письмо');
+  } catch {
+    toast('Браузер не дал доступ к буферу обмена — выделите текст отчёта вручную', 'bad');
+  }
+}
+
+function printReport() {
+  document.body.classList.add('print-ai');
+  window.addEventListener('afterprint', () => document.body.classList.remove('print-ai'), { once: true });
+  window.print();
+}
+
 function renderAnalysis(analysis) {
+  lastAnalysis = analysis;
   const box = $('ai-result');
   if (!analysis) {
     box.replaceChildren();
     return;
   }
-  const parts = [el('p', analysis.summary, 'ai-summary')];
-  if (analysis.findings.length) {
-    const list = el('div', null, 'ai-findings');
-    for (const f of analysis.findings) {
-      const [text, kind] = LEVEL[f.level] || LEVEL.medium;
-      const item = el('div', null, 'ai-finding');
-      const head = el('div', null, 'ai-finding-head');
-      head.append(badge(text, kind), el('strong', f.title));
-      item.append(head, el('p', f.detail, 'mb-0 text-secondary'));
-      list.append(item);
-    }
-    parts.push(el('h4', 'Что видно', 'mt-3'), list);
+  const when = new Date(analysis.generatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+  const parts = [el('p', `Отдел «${currentDepartment()?.name ?? ''}» · ${when}`, 'ai-print-head'),
+    linked(analysis.summary, 'ai-summary d-block')];
+
+  // находки по разделам
+  const groups = new Map();
+  for (const f of analysis.findings) {
+    if (!groups.has(f.category)) groups.set(f.category, []);
+    groups.get(f.category).push(f);
   }
+  for (const [category, list] of groups) {
+    const [title, iconName] = CATEGORY[category] || CATEGORY.ok;
+    const section = el('section', null, 'ai-section');
+    const h = el('h4', null, 'ai-section-title');
+    h.append(icon(iconName), title);
+    section.append(h, ...list.map(findingCard));
+    parts.push(section);
+  }
+
   if (analysis.recommendations.length) {
-    const ol = el('ol', null, 'ai-recommendations');
-    for (const r of analysis.recommendations) ol.append(el('li', r));
-    parts.push(el('h4', 'Что сделать', 'mt-3'), ol);
+    const section = el('section', null, 'ai-section');
+    const h = el('h4', null, 'ai-section-title');
+    h.append(icon('bulb'), 'Общие действия');
+    const ul = el('ul', null, 'ai-actions');
+    ul.append(...analysis.recommendations.map(actionItem));
+    section.append(h, ul);
+    parts.push(section);
   }
-  const when = new Date(analysis.generatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  parts.push(el('p', `Модель ${analysis.model} · ${when}${analysis.cached ? ' · это недавний разбор' : ''}`
-    + ' · по обезличенной сводке за сутки. Это подсказка: проверяйте выводы по цифрам ниже.', 'text-secondary small mt-3 mb-0'));
+
+  const foot = el('div', null, 'ai-foot');
+  foot.append(el('p', `Модель ${analysis.model} · ${when}${analysis.cached ? ' · это недавний разбор' : ''}. `
+    + (analysis.structured ? 'Находки и цифры посчитал сервер, пояснения и действия предложил ИИ — это подсказка.'
+      : 'Модель ответила не по формату: находки посчитаны сервером, её текст показан как есть.'), 'text-secondary small mb-0'));
+  const tools = el('div', null, 'btn-list ai-report-tools');
+  tools.append(button('Скопировать', copyReport, 'btn btn-sm', 'file-text'), button('Распечатать', printReport, 'btn btn-sm', 'download'));
+  foot.append(tools);
+  parts.push(foot);
   box.replaceChildren(...parts);
 }
 

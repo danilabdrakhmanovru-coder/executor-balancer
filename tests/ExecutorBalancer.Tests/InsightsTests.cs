@@ -65,8 +65,10 @@ public class InsightsTests : IAsyncLifetime
             Вот разбор:
             ```json
             {"summary": "Ипотеку брать некому.",
-             "findings": [{"level": "HIGH", "title": "Нет навыка «ипотека»", "detail": "2 заявки ждут, сотрудников 0"}],
-             "recommendations": ["Обучить С-1 ипотеке"]}
+             "notes": [{"id": "s1", "why": "Ни у кого нет навыка «ипотека».",
+                        "actions": [{"text": "Обучить С-1 ипотеке", "who": "Руководитель", "effect": "заявки перестанут ждать"},
+                                    {"text": "Проверить правило «Тематика»", "who": "администратор"}]}],
+             "extra": ["Добавить сотрудника на ипотеку"]}
             ```
             """;
 
@@ -75,9 +77,16 @@ public class InsightsTests : IAsyncLifetime
 
         Assert.True(first.Structured);
         Assert.Equal("Ипотеку брать некому.", first.Summary);
-        var finding = Assert.Single(first.Findings);
-        Assert.Equal("high", finding.Level);
-        Assert.Equal(["Обучить С-1 ипотеке"], first.Recommendations);
+        // находки — от сервера: точные заголовок и цифры, ссылка на значение параметра
+        var gap = first.Findings.Single(f => f.Id == "s1");
+        Assert.Equal(("skills", "high", "subject", "ипотека"), (gap.Category, gap.Level, gap.FieldKey, gap.Value));
+        Assert.Equal("Некому брать: тематика «ипотека»", gap.Title);
+        // от модели — пояснение и действия с пометкой «кому»
+        Assert.Equal("Ни у кого нет навыка «ипотека».", gap.Why);
+        Assert.Equal([("руководитель", "заявки перестанут ждать"), ("администратор", null)],
+            gap.Actions.Select(a => (a.Who, a.Effect)));
+        Assert.Contains(first.Findings, f => f.Category == "queue" && f.Why is null && f.Actions.Count == 0);
+        Assert.Equal("Добавить сотрудника на ипотеку", Assert.Single(first.Recommendations).Text);
         Assert.True(second.Cached); // повтор в течение минуты — без нового запроса к модели
         var context = Assert.Single(_f.Ai.Requests);
         Assert.Contains("\"signals\"", context, StringComparison.Ordinal);
@@ -122,13 +131,20 @@ public class InsightsTests : IAsyncLifetime
     {
         var now = DateTimeOffset.UnixEpoch;
 
-        var text = AiAnalyst.Parse("Не могу ответить в JSON, но вот мысль: " + new string('а', 5000), "m", now);
+        AiAnalyst.Signal[] signals = [new("queue", "high", "Заявки ждут исполнителя", "Ждут 3 заявки.", []) { Id = "s1" }];
+
+        // не по схеме — находки сервера всё равно на месте, текст модели — как есть
+        var text = AiAnalyst.Parse("Не могу ответить в JSON, но вот мысль: " + new string('а', 5000), "m", now, signals);
         Assert.False(text.Structured);
-        Assert.Empty(text.Findings);
+        Assert.Equal("Заявки ждут исполнителя", Assert.Single(text.Findings).Title);
         Assert.True(text.Summary.Length <= 3000);
 
-        var odd = AiAnalyst.Parse("""{"summary": "ок", "findings": [{"level": "критично", "title": "т"}, {}], "recommendations": ["", "да"]}""", "m", now);
-        Assert.Equal("medium", Assert.Single(odd.Findings).Level);
-        Assert.Equal(["да"], odd.Recommendations);
+        // лишние и пустые записи модели не ломают отчёт; чужой id не создаёт находку
+        var odd = AiAnalyst.Parse("""
+            {"summary": "ок", "notes": [{"id": "s9", "why": "выдумка"}, {}, "строка"],
+             "extra": ["", {"text": "да", "who": "директор"}, 5]}
+            """, "m", now, signals);
+        Assert.Null(Assert.Single(odd.Findings).Why);
+        Assert.Equal(("да", "руководитель"), (Assert.Single(odd.Recommendations).Text, odd.Recommendations[0].Who));
     }
 }
