@@ -141,7 +141,9 @@ async function showApp(me) {
   setSession(me);
   const { demo } = session();
   $('user-name').textContent = session().name;
-  $('user-role').textContent = ROLE_TITLE[session().role];
+  const role = ROLE_TITLE[session().role];
+  // имя «Администратор» и роль «администратор» — одно и то же: второй строкой роль не повторяем
+  $('user-role').textContent = session().name.toLowerCase() === role ? session().login : role;
   $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
   await loadDepartments();

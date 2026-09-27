@@ -129,14 +129,18 @@ const CATEGORY = {
 };
 const WHO = { руководитель: '', администратор: 'warn' };
 
-/** Текст, где «С-3023» — ссылка на страницу сотрудника. Только узлы и textContent — без разметки из ответа модели. */
+/** Имя сотрудника вместо номера «С-3023», если имя известно (модель видит только номера). */
+const person = (id) => lastAnalysis?.people?.[id];
+
+/** Текст, где «С-3023» — ссылка на страницу сотрудника с его именем. Только узлы и textContent — без разметки из ответа модели. */
 function linked(text, cls) {
   const node = el('span', null, cls);
   let last = 0;
   for (const m of String(text ?? '').matchAll(/[СC]-(\d{1,12})/g)) {
     node.append(text.slice(last, m.index));
-    const a = el('a', m[0]);
+    const a = el('a', person(m[1]) ?? m[0]);
     a.href = `#executor-${m[1]}`;
+    a.title = `номер в АИС: ${m[1]}`;
     node.append(a);
     last = m.index + m[0].length;
   }
@@ -155,7 +159,7 @@ function findingCard(f) {
   const [text, kind] = LEVEL[f.level] || LEVEL.medium;
   const card = el('div', null, 'ai-finding');
   const head = el('div', null, 'ai-finding-head');
-  head.append(badge(text, kind), el('strong', f.title));
+  head.append(badge(text, kind), linked(f.title, 'fw-bold'));
   card.append(head, linked(f.detail, 'd-block text-secondary'));
   if (f.why) {
     const why = el('p', null, 'ai-why mb-0');
@@ -171,7 +175,7 @@ function findingCard(f) {
   for (const id of f.executors) {
     const a = el('a', null, 'btn btn-sm btn-ghost-primary');
     a.href = `#executor-${id}`;
-    a.append(icon('user-circle'), `Страница С-${id}`);
+    a.append(icon('user-circle'), `Страница: ${person(id) ?? `С-${id}`}`);
     links.append(a);
   }
   if (f.fieldKey) {
@@ -181,8 +185,13 @@ function findingCard(f) {
   return card;
 }
 
-/** Отчёт текстом — для копирования в чат или письмо. */
+/** Отчёт текстом — для копирования в чат или письмо; вместо номеров — имена. */
 function reportText(a) {
+  const names = (t) => String(t ?? '').replace(/[СC]-(\d{1,12})/g, (all, id) => a.people?.[id] ?? all);
+  return reportLines(a).map(names).join('\n');
+}
+
+function reportLines(a) {
   const when = new Date(a.generatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
   const lines = [`ИИ-разбор заявок · отдел «${currentDepartment()?.name ?? ''}» · ${when}`, '', a.summary, ''];
   for (const f of a.findings) {
@@ -196,7 +205,7 @@ function reportText(a) {
     for (const x of a.recommendations) lines.push(`— ${x.text} (кому: ${x.who}${x.effect ? `; что изменится: ${x.effect}` : ''})`);
   }
   lines.push('', `Модель ${a.model}; находки и цифры посчитаны сервером, пояснения и действия — ИИ.`);
-  return lines.join('\n');
+  return lines;
 }
 
 async function copyReport() {
@@ -264,7 +273,8 @@ function renderAnalysis(analysis) {
 
 function renderStatus(status) {
   configured = status.isConfigured;
-  if (!running) waitBeforeNew(status.retryInSeconds ?? 0);
+  if (running) return; // идёт разбор: не затираем «ждём ответ модели» и не трогаем кнопку
+  waitBeforeNew(status.retryInSeconds ?? 0);
   $('ai-status').textContent = status.isConfigured
     ? (status.last ? '' : can('Manager')
       ? `Подключена модель ${status.model}. Нажмите «Разобрать с ИИ» — облачная модель отвечает за 10–60 секунд, своя без видеокарты — за несколько минут.`
@@ -297,8 +307,8 @@ export function initInsights() {
       toast(problemText(e), 'bad');
     } finally {
       running = false;
-      // сразу узнаём у сервера, когда можно следующий разбор (обычно через минуту)
-      try { renderStatus(await api('/api/admin/ai/status')); } catch { renderButton(); }
+      // сразу узнаём у сервера, когда можно следующий разбор (обычно через минуту); отчёт и текст ошибки не трогаем
+      try { waitBeforeNew((await api('/api/admin/ai/status')).retryInSeconds ?? 0); } catch { renderButton(); }
     }
   });
 }

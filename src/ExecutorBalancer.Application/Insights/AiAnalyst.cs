@@ -49,6 +49,10 @@ public sealed record AiFinding(
 
 /// <param name="Structured">Модель ответила по схеме; false — находки всё равно от сервера, а текст модели — как есть.</param>
 /// <param name="Cached">Отдан недавний разбор вместо нового запроса к модели.</param>
+/// <param name="People">
+/// Имена сотрудников, упомянутых в находках, — только для экрана: модель видит номера («С-3005»), а интерфейс
+/// показывает руководителю имена.
+/// </param>
 public sealed record AiAnalysis(
     DateTimeOffset GeneratedAt,
     string Model,
@@ -56,7 +60,8 @@ public sealed record AiAnalysis(
     IReadOnlyList<AiFinding> Findings,
     IReadOnlyList<AiAction> Recommendations,
     bool Structured,
-    bool Cached = false);
+    bool Cached = false,
+    IReadOnlyDictionary<long, string>? People = null);
 
 /// <summary>
 /// Общий для приложения ограничитель: не больше двух разборов одновременно, а повторный запрос по тому же отделу
@@ -175,7 +180,12 @@ public sealed class AiAnalyst(
             var answer = await chat.CompleteAsync(SystemPrompt, context, cancellationToken);
             logger.LogInformation("ИИ-разбор отдела {Department}: модель {Model}, {Ms} мс", departmentId, chat.Model,
                 watch.ElapsedMilliseconds);
-            return Parse(answer, chat.Model, clock.GetUtcNow(), signals);
+            // имена — для экрана, после ответа модели: в модель они не уходят
+            var ids = signals.SelectMany(x => x.Executors).Distinct().ToList();
+            var people = await db.Executors.AsNoTracking()
+                .Where(e => e.DepartmentId == departmentId && ids.Contains(e.Id))
+                .ToDictionaryAsync(e => e.Id, e => e.FullName, cancellationToken);
+            return Parse(answer, chat.Model, clock.GetUtcNow(), signals) with { People = people };
         });
     }
 
