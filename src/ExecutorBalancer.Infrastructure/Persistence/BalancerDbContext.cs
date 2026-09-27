@@ -26,6 +26,17 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
 
     public void Detach(object entity) => Entry(entity).State = EntityState.Detached;
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        // тесты идут на SQLite, а он не сравнивает даты с часовым поясом в запросах — храним их там числом;
+        // в PostgreSQL (боевая база) это timestamptz, как и было
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            configurationBuilder.Properties<DateTimeOffset>()
+                .HaveConversion<Microsoft.EntityFrameworkCore.Storage.ValueConversion.DateTimeOffsetToBinaryConverter>();
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var model = modelBuilder;

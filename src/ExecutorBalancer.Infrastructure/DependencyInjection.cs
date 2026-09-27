@@ -45,6 +45,26 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.Add("X-Api-Key", ais.ApiKey);
             client.Timeout = TimeSpan.FromSeconds(5);
         });
+        // ИИ-разбор заявок: необязателен, без адреса модели выключен
+        services.AddOptions<Ai.AiOptions>()
+            .Bind(configuration.GetSection(Ai.AiOptions.Section))
+            .Validate(o => string.IsNullOrWhiteSpace(o.BaseUrl)
+                || (Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"),
+                "Ai:BaseUrl — адрес http(s)")
+            .Validate(o => o.TimeoutSeconds is >= 5 and <= 600 && o.MaxTokens is >= 100 and <= 16000,
+                "Ai:TimeoutSeconds — от 5 до 600, Ai:MaxTokens — от 100 до 16000")
+            .ValidateOnStart();
+        services.AddHttpClient(Ai.AiOptions.HttpClientName, (sp, client) =>
+        {
+            var ai = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Ai.AiOptions>>().Value;
+            if (!string.IsNullOrWhiteSpace(ai.BaseUrl))
+            {
+                client.BaseAddress = new Uri(ai.BaseUrl.TrimEnd('/') + "/");
+            }
+
+            client.Timeout = TimeSpan.FromSeconds(ai.TimeoutSeconds);
+        });
+        services.AddSingleton<Application.Insights.IAiChat, Ai.OpenAiCompatibleChat>();
         services.AddHostedService<OutboxDispatcher>();
         services.AddHostedService<PendingRetryWorker>();
         return services;

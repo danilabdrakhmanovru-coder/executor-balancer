@@ -67,6 +67,7 @@
           <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Мониторинг</button>
           <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Сотрудники</button>
           <button data-tab="analytics" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Аналитика</button>
+          <button data-tab="insights" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#sparkles"></use></svg>Разбор заявок</button>
           <button data-tab="constructor" data-group="settings" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#settings"></use></svg>Настройки</button>
           <button data-tab="audit" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#history"></use></svg>Журнал</button>
           <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Заменяет настоящую АИС на демонстрации: создаёт заявки и сотрудников"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Тестовый стенд</button>
@@ -421,6 +422,67 @@
           </div>
 
           <!-- Настройки → Параметры и правила -->
+          <section id="tab-insights" class="tab-page hidden">
+            <p class="page-hint">Разбор заявок отдела за последние 24 часа: какие заявки приходят, хватает ли сотрудников с нужными
+              навыками, где копится очередь и доработки. Цифры считает сервер; ИИ по этим цифрам пишет выводы и советы
+              руководителю. В модель уходит только сводка — без ФИО сотрудников и текста заявок, а распределение от ИИ не зависит.</p>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#sparkles"></use></svg>ИИ-разбор</h3>
+                <div class="card-actions">
+                  <button id="ai-run" class="btn btn-primary" type="button"><svg class="icon"><use href="icons.svg#sparkles"></use></svg><span id="ai-run-text">Разобрать с ИИ</span></button>
+                </div>
+              </div>
+              <div class="card-body">
+                <p id="ai-status" class="text-secondary mb-0"></p>
+                <div id="ai-result" class="ai-result"></div>
+              </div>
+            </div>
+            <div class="row row-cards tiles" id="in-tiles"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Спрос и покрытие</h3>
+                <div class="card-actions text-secondary">хватает ли сотрудников с нужными навыками</div>
+              </div>
+              <div class="card-body pb-0">
+                <div class="btn-group flex-wrap" id="in-fields" role="group" aria-label="Параметр заявки"></div>
+                <p class="text-secondary small mt-3">«Хватает ли сил» сравнивает долю этих заявок в потоке с долей сил сотрудников,
+                  которые могут их брать (по квалификации): «не хватает» — заявок в 1,5 раза больше, чем сил, они будут ждать;
+                  «некому брать» — по правилам не подходит ни один активный сотрудник. Наведите на метку — покажет расчёт.</p>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead><tr><th>Значение</th><th>Заявок</th><th>Ждут</th><th>Доработки</th><th>Могут брать</th><th>Доля сил</th><th>Хватает ли сил</th></tr></thead>
+                  <tbody id="in-options"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Правила, по которым заявки некому брать</h3></div>
+                  <div class="table-responsive">
+                    <table class="table table-vcenter card-table">
+                      <thead><tr><th>Правило</th><th>Заявок</th><th>Доля</th></tr></thead>
+                      <tbody id="in-blocked"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Почему заявки ждут сейчас</h3></div>
+                  <div class="table-responsive">
+                    <table class="table table-vcenter card-table">
+                      <thead><tr><th>Причина</th><th>Заявок</th></tr></thead>
+                      <tbody id="in-waiting"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section id="tab-constructor" class="tab-page hidden">
             <div class="card intro">
               <div class="card-body">
@@ -596,7 +658,6 @@
       </div>
       <footer class="app-footer container-xl">
         <span>Executor Balancer — распределение заявок между сотрудниками в реальном времени</span>
-        <button id="to-top" class="btn btn-sm btn-ghost-secondary" type="button"><svg class="icon"><use href="icons.svg#arrow-up"></use></svg>Наверх</button>
       </footer>
     </div>
   </div>
@@ -623,6 +684,7 @@
     </form>
   </dialog>
 
+  <button id="scroll-top" class="btn btn-primary btn-icon scroll-top" type="button" aria-label="Наверх" title="Наверх"><svg class="icon"><use href="icons.svg#arrow-up"></use></svg></button>
   <div id="toast" class="toast-box hidden" role="status"></div>
 </body>
 </html>

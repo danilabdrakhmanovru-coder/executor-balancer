@@ -124,6 +124,13 @@ tr.fresh { animation: flash 1.2s ease-out; }
   width: 100%; margin-top: 32px; padding-top: 24px; padding-bottom: 48px; border-top: 1px solid var(--tblr-border-color);
   color: var(--muted); font-size: 13px; }
 .chart.is-empty { min-height: 0; }
+/* кнопка «Наверх»: появляется, когда страница прокручена дальше полутора экранов */
+.scroll-top { position: fixed; right: 24px; bottom: 24px; z-index: 1030; width: 44px; height: 44px; border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .18); opacity: 0; transform: translateY(12px); pointer-events: none;
+  transition: opacity .2s, transform .2s; }
+.scroll-top.visible { opacity: 1; transform: none; pointer-events: auto; }
+@media (max-width: 575.98px) { .scroll-top { right: 16px; bottom: 16px; } }
+@media (prefers-reduced-motion: reduce) { .scroll-top { transition: none; } }
 .chart.is-empty .chart-empty { margin: 4px 0; }
 .chart-empty { color: var(--muted); font-size: 13px; margin: 24px 0; text-align: center; }
 .svg-chart { width: 100%; height: auto; display: block; overflow: visible; font-variant-numeric: tabular-nums; }
@@ -335,3 +342,11 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .demo-badge { font-weight: 600; letter-spacing: .02em; }
 
 .import-preview { max-height: 45vh; overflow: auto; }
+
+/* ИИ-разбор */
+.ai-result:not(:empty) { margin-top: 4px; }
+.ai-summary { font-size: 15px; line-height: 1.55; margin-bottom: 0; }
+.ai-findings { display: grid; gap: 10px; }
+.ai-finding { padding: 10px 12px; border: 1px solid var(--tblr-border-color); border-radius: 8px; }
+.ai-finding-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.ai-recommendations { margin: 0; padding-left: 20px; display: grid; gap: 6px; }

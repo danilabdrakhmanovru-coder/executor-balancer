@@ -25,6 +25,9 @@ public static class DashboardEndpoints
         group.MapGet("/executors/{id:long}", ExecutorPage);
         group.MapGet("/live", (DepartmentScope d, AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(d.Id, ct));
         group.MapGet("/analytics", Analytics);
+        // спрос и покрытие за сутки — факты без ИИ, на них же опирается ИИ-разбор
+        group.MapGet("/demand", (DepartmentScope d, Application.Insights.DemandAnalyzer demand, CancellationToken ct) =>
+            demand.BuildAsync(d.Id, ct));
         group.MapGet("/export.csv", Export);
         return app;
     }

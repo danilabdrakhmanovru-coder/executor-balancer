@@ -16,6 +16,7 @@ import { initDepartmentsAdmin, refreshDepartments, setDepartmentsDemo } from './
 import { initMotivation, refreshMotivation } from './motivation.js';
 import { refreshStart, setStartDemo } from './start.js';
 import { initOrders, refreshOrders } from './orders.js';
+import { initInsights, refreshInsights } from './insights.js';
 
 const TABS = {
   start: { refresh: refreshStart, every: 3000 },
@@ -24,6 +25,7 @@ const TABS = {
   executors: { refresh: refreshExecutors, every: 5000 },
   profile: { refresh: () => refreshProfile(profileId), every: 5000 },
   analytics: { refresh: refreshAnalytics, every: 15000 },
+  insights: { refresh: refreshInsights, every: 15000 },
   constructor: {
     refresh: async () => {
       await refreshConstructor();
@@ -123,7 +125,18 @@ async function showApp() {
 let theme = 'light';
 try { theme = localStorage.getItem('eb.theme') === 'dark' ? 'dark' : 'light'; } catch { /* приватный режим */ }
 document.documentElement.setAttribute('data-bs-theme', theme);
-$('to-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+const toTop = () => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+$('scroll-top').addEventListener('click', toTop);
+// плавающая «Наверх» — только когда вернуться вверх уже далеко; проверка раз в кадр, без лишней работы при прокрутке
+let scrollQueued = false;
+window.addEventListener('scroll', () => {
+  if (scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    $('scroll-top').classList.toggle('visible', window.scrollY > window.innerHeight * 1.5);
+  });
+}, { passive: true });
 $('theme').addEventListener('click', () => {
   theme = theme === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-bs-theme', theme);
@@ -181,6 +194,7 @@ initAudit();
 initDemo();
 initExecutors();
 initOrders();
+initInsights();
 initDepartments(departmentChanged);
 initDepartmentsAdmin();
 initMotivation();

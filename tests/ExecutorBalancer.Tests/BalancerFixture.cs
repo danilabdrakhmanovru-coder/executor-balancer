@@ -27,6 +27,22 @@ internal sealed class BalancerFixture : IAsyncDisposable
 
     public InMemoryLoadStore Store { get; }
 
+    /// <summary>Подставная модель для ИИ-разбора: без адреса — «не подключена».</summary>
+    public FakeAiChat Ai { get; private init; } = null!;
+
+    public async Task<T> Insights<T>(Func<ExecutorBalancer.Application.Insights.AiAnalyst, Task<T>> action)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await action(scope.ServiceProvider.GetRequiredService<ExecutorBalancer.Application.Insights.AiAnalyst>());
+    }
+
+    public async Task<ExecutorBalancer.Application.Insights.DemandReport> Demand(int department = D)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<ExecutorBalancer.Application.Insights.DemandAnalyzer>()
+            .BuildAsync(department, CancellationToken.None);
+    }
+
     public static async Task<BalancerFixture> CreateAsync()
     {
         var connection = new SqliteConnection("DataSource=:memory:");
@@ -47,6 +63,8 @@ internal sealed class BalancerFixture : IAsyncDisposable
         services.AddScoped<IBalancerDbContext>(sp => sp.GetRequiredService<BalancerDbContext>());
         services.AddSingleton<ILoadStore>(store);
         services.AddApplication(configuration);
+        var ai = new FakeAiChat();
+        services.AddSingleton<ExecutorBalancer.Application.Insights.IAiChat>(ai);
         var provider = services.BuildServiceProvider();
 
         await using (var scope = provider.CreateAsyncScope())
@@ -56,7 +74,7 @@ internal sealed class BalancerFixture : IAsyncDisposable
             await DefaultConfiguration.SeedAsync(db, CancellationToken.None);
         }
 
-        return new BalancerFixture(connection, provider, store);
+        return new BalancerFixture(connection, provider, store) { Ai = ai };
     }
 
     public async Task<T> Run<T>(Func<OrderBalancer, Task<T>> action)

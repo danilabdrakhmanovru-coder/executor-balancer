@@ -24,6 +24,9 @@ public static class DependencyInjection
         services.AddScoped<DepartmentService>();
         services.AddScoped<Executors.ExecutorImportService>();
         services.AddScoped<AnalyticsService>();
+        services.AddScoped<Insights.DemandAnalyzer>();
+        services.AddScoped<Insights.AiAnalyst>();
+        services.AddSingleton<Insights.AiGate>();
         return services;
     }
 }

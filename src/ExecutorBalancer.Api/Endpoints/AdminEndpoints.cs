@@ -4,6 +4,7 @@ using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Application.Executors;
+using ExecutorBalancer.Application.Insights;
 
 namespace ExecutorBalancer.Api.Endpoints;
 
@@ -49,6 +50,26 @@ public static class AdminEndpoints
                 await config.UpdateWeightRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
         group.MapDelete("/weight-rules/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
             await config.DeleteWeightRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
+
+        // ИИ-разбор заявок: подсказка руководителю, в распределении не участвует
+        group.MapGet("/ai/status", (DepartmentScope d, AiAnalyst ai) =>
+            Results.Ok(new { ai.IsConfigured, Model = ai.IsConfigured ? ai.Model : null, Last = ai.Last(d.Id) }));
+        group.MapPost("/ai/analysis", async (DepartmentScope d, AiAnalyst ai, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await ai.AnalyzeAsync(d.Id, ct));
+            }
+            catch (AiBusyException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: ex.Message);
+            }
+            catch (AiUnavailableException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "ИИ-разбор недоступен",
+                    detail: ex.Message);
+            }
+        });
 
         group.MapGet("/presets", (DepartmentScope d, ConfigurationService config, CancellationToken ct) => config.GetPresetsAsync(d.Id, ct));
         group.MapPost("/presets/{id}/apply", async (DepartmentScope d, string id, ConfigurationService config, CancellationToken ct) =>
