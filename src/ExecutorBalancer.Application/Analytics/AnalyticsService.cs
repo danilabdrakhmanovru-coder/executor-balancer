@@ -241,9 +241,9 @@ public sealed class AnalyticsService(
 
     /// <summary>
     /// Эталон за один час. Пятиминутки идут по порядку, каждая «доливается» поверх нагрузки, набранной в этот час
-    /// к её началу, — так же, как выбирает сам алгоритм. Назначения без выбора приходят в течение часа: в каждую
-    /// пятиминутку попадает их доля, пропорциональная её потоку. Записи без пятиминуток (до их появления) — один
-    /// отрезок на весь час, как раньше.
+    /// к её началу, — так же, как выбирает сам алгоритм. Назначения без выбора стоят в своей пятиминутке (строки
+    /// «=id»); то, что записано до появления пятиминуток, делится между ними пропорционально потоку. Записи без
+    /// пятиминуток (старые) — один отрезок на весь час, как раньше.
     /// </summary>
     private static Dictionary<long, decimal> FairHour(List<ExecutorHourStat> rows, List<EligibilityHourStat> pools,
         IReadOnlyDictionary<long, decimal> qualification, HashSet<(long ExecutorId, long Hour)> capped)
@@ -254,24 +254,37 @@ public sealed class AnalyticsService(
         var caps = rows.GroupBy(r => r.ExecutorId)
             .Where(g => capped.Contains((g.Key, g.First().BucketHour)))
             .ToDictionary(g => g.Key, g => g.Sum(r => r.AssignedWeight));
-        var slots = pools.GroupBy(p => p.Slot).OrderBy(g => g.Key).Select(g => g.ToList()).ToList();
-        var total = slots.Sum(slot => slot.Sum(p => p.Weight));
+        var pinned = pools
+            .Select(p => (Pool: p, Executor: ExecutorStats.PinnedExecutor(p.SetKey)))
+            .Where(x => x.Executor is not null)
+            .ToList();
+        var groups = pools.Where(p => ExecutorStats.PinnedExecutor(p.SetKey) is null).ToList();
+        var total = groups.Sum(p => p.Weight);
         if (total <= 0)
         {
             return forced;
         }
 
+        // то, что не разложено по пятиминуткам, — пропорционально потоку
+        var unplaced = forced.ToDictionary(f => f.Key,
+            f => Math.Max(0, f.Value - pinned.Where(x => x.Executor == f.Key).Sum(x => x.Pool.Weight)));
         var load = new Dictionary<long, decimal>();
-        foreach (var slot in slots)
+        foreach (var slot in groups.Select(p => p.Slot).Concat(pinned.Select(x => x.Pool.Slot)).Distinct().Order())
         {
-            var share = slot.Sum(p => p.Weight) / total;
-            foreach (var (id, weight) in forced)
+            var slotGroups = groups.Where(p => p.Slot == slot).ToList();
+            var share = slotGroups.Sum(p => p.Weight) / total;
+            foreach (var (id, weight) in unplaced)
             {
                 load[id] = load.GetValueOrDefault(id) + weight * share;
             }
 
+            foreach (var (pool, id) in pinned.Where(x => x.Pool.Slot == slot))
+            {
+                load[id!.Value] = load.GetValueOrDefault(id.Value) + pool.Weight;
+            }
+
             load = FairShare.Allocate(
-                slot.GroupBy(p => p.SetKey).Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight))),
+                slotGroups.GroupBy(p => p.SetKey).Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight))),
                 qualification, load, caps);
         }
 

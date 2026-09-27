@@ -13,6 +13,9 @@ public class EligibilityHourStat
     /// <summary>Длина отрезка внутри часа, секунд.</summary>
     public const int SlotSeconds = 300;
 
+    /// <summary>Начало ключа строки с назначениями без выбора: «=15».</summary>
+    public const string PinnedPrefix = "=";
+
     public int DepartmentId { get; set; } = Department.DefaultId;
 
     /// <summary>Номер часа: unix-время начала часа (UTC), делённое на 3600.</summary>
@@ -21,7 +24,10 @@ public class EligibilityHourStat
     /// <summary>Пятиминутка внутри часа: 0–11. Записи до её появления — все в 0 (час целиком).</summary>
     public int Slot { get; set; }
 
-    /// <summary>Идентификаторы подходивших исполнителей по возрастанию через запятую.</summary>
+    /// <summary>
+    /// Идентификаторы подходивших исполнителей по возрастанию через запятую. «=id» — назначения без выбора
+    /// этому исполнителю (от родителя, вторичные, сверх нормы) за эту пятиминутку.
+    /// </summary>
     public string SetKey { get; set; } = "";
 
     public int Count { get; set; }

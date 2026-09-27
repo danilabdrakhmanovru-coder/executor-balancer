@@ -115,11 +115,30 @@ public static class ExecutorStats
         IEnumerable<long> eligible, decimal weight, CancellationToken cancellationToken)
     {
         var key = string.Join(',', eligible.Distinct().Order().Select(id => id.ToString(CultureInfo.InvariantCulture)));
-        if (key.Length is 0 or > EligibilityHourStat.MaxSetKeyLength)
-        {
-            return Task.CompletedTask;
-        }
+        return key.Length is 0 or > EligibilityHourStat.MaxSetKeyLength
+            ? Task.CompletedTask
+            : AddAsync(db, moment, departmentId, key, weight, cancellationToken);
+    }
 
+    /// <summary>
+    /// Назначение без выбора (от родителя, вторичное, сверх нормы) — строка «=id» в той же таблице:
+    /// эталон знает, в какую пятиминутку оно пришло, и не размазывает его по часу.
+    /// </summary>
+    public static Task RecordPinnedAsync(IBalancerDbContext db, DateTimeOffset moment, int departmentId,
+        long executorId, decimal weight, CancellationToken cancellationToken) =>
+        AddAsync(db, moment, departmentId, EligibilityHourStat.PinnedPrefix + executorId.ToString(CultureInfo.InvariantCulture),
+            weight, cancellationToken);
+
+    /// <summary>Исполнитель строки «=id» или null, если это группа «кто мог взять».</summary>
+    public static long? PinnedExecutor(string key) =>
+        key.StartsWith(EligibilityHourStat.PinnedPrefix, StringComparison.Ordinal)
+        && long.TryParse(key.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            ? id
+            : null;
+
+    private static Task<int> AddAsync(IBalancerDbContext db, DateTimeOffset moment, int departmentId, string key,
+        decimal weight, CancellationToken cancellationToken)
+    {
         return db.Database.ExecuteSqlRawAsync(
             """
             INSERT INTO eligibility_hour_stats ("DepartmentId", "BucketHour", "Slot", "SetKey", "Count", "Weight")

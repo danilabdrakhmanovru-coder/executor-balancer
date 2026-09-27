@@ -44,7 +44,7 @@ public class MidHourLimitTests : IAsyncLifetime
         Assert.True(report.Fairness.MaxAbsDeviationPercent < 6m, $"перекос {report.Fairness.MaxAbsDeviationPercent}%");
     }
 
-    /// <summary>Назначения без выбора (от родителя) делятся между пятиминутками пропорционально потоку и остаются в эталоне.</summary>
+    /// <summary>Назначения без выбора, записанные без пятиминутки (старые данные), делятся пропорционально потоку и остаются в эталоне.</summary>
     [Fact]
     public async Task ForcedWeightStaysInReference()
     {
@@ -64,6 +64,32 @@ public class MidHourLimitTests : IAsyncLifetime
 
         Assert.All(report.Executors, e => Assert.Equal(12m, Math.Round(e.FairWeight, 3)));
         Assert.Equal(0m, report.Fairness.MeanAbsDeviationPercent);
+    }
+
+    /// <summary>
+    /// Назначения без выбора стоят в своей пятиминутке: первый получил 10 от родителя во второй пятиминутке, и
+    /// свободные заявки тогда по праву ушли второму. Размажь их по часу — эталон решил бы, что первый недобрал.
+    /// </summary>
+    [Fact]
+    public async Task PinnedWeightStaysInItsSlot()
+    {
+        await _f.AddExecutor(1);
+        await _f.AddExecutor(2);
+
+        var hour = ExecutorStats.HourOf(DateTimeOffset.UtcNow) - 2;
+        await _f.Query(async db =>
+        {
+            db.ExecutorHourStats.AddRange(Row(hour, 1, 20, forced: 10), Row(hour, 2, 20));
+            db.EligibilityHourStats.AddRange(
+                Pool(hour, 0, "1,2", 20),
+                Pool(hour, 1, "=1", 10), Pool(hour, 1, "1,2", 10));
+            return await db.SaveChangesAsync();
+        });
+
+        var report = await _f.Analytics(AnalyticsPeriod.Day);
+
+        Assert.All(report.Executors, e => Assert.Equal(20m, Math.Round(e.FairWeight, 3)));
+        Assert.Equal(0m, report.Fairness.MaxAbsDeviationPercent);
     }
 
     private static ExecutorHourStat Row(long hour, long executor, int weight, int forced = 0) => new()
