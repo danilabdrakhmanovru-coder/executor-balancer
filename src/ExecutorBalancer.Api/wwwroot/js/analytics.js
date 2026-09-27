@@ -72,7 +72,9 @@ function renderRating(executors, motivation) {
       const q = percent(e.quality);
       const quality = q === null ? '—' : badge(`${fmt(q)}%`, q < threshold ? 'bad' : q < percent(motivation.heavyQualityThreshold) ? 'warn' : 'ok');
       const name = el('span');
-      name.append(el('span', e.name));
+      const link = el('a', e.name, 'executor-name');
+      link.href = `#executor-${e.id}`;
+      name.append(link);
       if (e.rank && e.rank <= 3) name.append(' ', badge(`${e.rank} место`, 'ok'));
       let place = e.rank ? String(e.rank) : '—';
       if (!e.rank && e.closed > 0) {

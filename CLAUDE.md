@@ -25,7 +25,8 @@ docs/DECISIONS.md (трактовки ТЗ), docs/ARCHITECTURE.md (диагра�
 в шапке (`department.js`), `api.js` сам добавляет `?department=` к `/api/dashboard` и `/api/admin`, на сервере —
 `DepartmentScope` + фильтр `RequireDepartment`. Любой новый запрос к данным — с фильтром по отделу.
 `wwwroot/js`: `main.js` — вкладки; по файлу на вкладку (`overview.js` — Мониторинг, `executors.js`, `analytics.js`,
-`constructor.js`, `preview.js`, `departments.js`, `audit.js`, `demo.js` — Имитация АИС); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
+`constructor.js`, `preview.js`, `departments.js` + `sphere.js` (мастер своей сферы, сервер — `SphereBuilder`), `profile.js`
+(страница сотрудника `#executor-ID`), `audit.js`, `demo.js` — Имитация АИС); общие — `api.js`, `dom.js`, `forms.js` (форма по справочнику),
 `editor.js` (диалог), `charts.js`, `explain.js`, `presets.js`. Пульт демонстрации — `Endpoints/DemoEndpoints.cs`
 (прокси к эмулятору), генератор и симуляция — `src/AisEmulator.Api/Simulation`, шаблоны сфер —
 `Application/Configuration/DomainPresets.cs`.

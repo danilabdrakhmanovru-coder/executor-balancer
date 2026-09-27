@@ -34,6 +34,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.Property(x => x.Code).HasMaxLength(32);
             e.Property(x => x.Name).HasMaxLength(120);
             e.Property(x => x.PresetId).HasMaxLength(32);
+            e.Property(x => x.SphereTitle).HasMaxLength(120);
             e.HasIndex(x => x.Code).IsUnique();
             e.Property(x => x.ReworkPenalty).HasPrecision(4, 3);
             e.Property(x => x.FastClosePenalty).HasPrecision(4, 3);

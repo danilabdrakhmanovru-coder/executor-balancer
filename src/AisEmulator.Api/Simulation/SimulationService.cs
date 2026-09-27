@@ -12,7 +12,8 @@ public sealed record SimulationRequest(
     ValueSpec[] OrderFields,
     string? Department = null,
     double HastyShare = 0.15,
-    double ParentProbability = 0.08)
+    double ParentProbability = 0.08,
+    long? NextOrderId = null)
 {
     public const double MaxRatePerHour = 72_000;
 
@@ -26,6 +27,11 @@ public sealed record SimulationRequest(
         if (RatePerHour is <= 0 or > MaxRatePerHour)
         {
             return $"скорость — от 1 до {MaxRatePerHour} заявок в час";
+        }
+
+        if (NextOrderId is < 1)
+        {
+            return "номер следующей заявки должен быть положительным";
         }
 
         if (HastyShare is < 0 or > 1 || ParentProbability is < 0 or > 1)

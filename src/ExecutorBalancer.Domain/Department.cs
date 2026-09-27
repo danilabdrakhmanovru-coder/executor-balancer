@@ -19,6 +19,9 @@ public class Department
     /// <summary>Шаблон сферы, с которого отдел начинался. Параметры и правила потом можно менять свободно.</summary>
     public string? PresetId { get; set; }
 
+    /// <summary>Название своей сферы, собранной мастером (когда отдел начат не с шаблона).</summary>
+    public string? SphereTitle { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     // ---------- мотивация: рейтинг, режим «больше нормы», защита от работы на количество ----------

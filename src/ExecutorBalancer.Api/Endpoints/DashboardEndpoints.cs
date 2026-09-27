@@ -3,6 +3,7 @@ using System.Text;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
+using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Application.Rules;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,7 @@ public static class DashboardEndpoints
         group.MapGet("/summary", Summary);
         group.MapGet("/feed", Feed);
         group.MapGet("/orders/{id:long}", OrderDetails);
+        group.MapGet("/executors/{id:long}", ExecutorPage);
         group.MapGet("/live", (DepartmentScope d, AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(d.Id, ct));
         group.MapGet("/analytics", Analytics);
         group.MapGet("/export.csv", Export);
@@ -225,6 +227,119 @@ public static class DashboardEndpoints
             .OrderBy(f => f.Id)
             .Take(3)
             .Select(f => Display(values[f.Key])));
+    }
+
+    /// <summary>
+    /// Страница сотрудника: что умеет (параметры отдела и в каких правилах они участвуют), сегодняшняя норма,
+    /// качество и баллы, место в рейтинге за 7 дней, активность по дням и последние заявки.
+    /// </summary>
+    private static async Task<IResult> ExecutorPage(DepartmentScope d, long id, IBalancerDbContext db,
+        ExecutorDirectory directory, ILoadStore loads, OrderBalancer balancer, AnalyticsService analytics,
+        QualityTracker quality, IOptions<BalancerOptions> options, CancellationToken ct)
+    {
+        var snapshot = await directory.GetAsync(d.Id, ct);
+        if (!snapshot.Executors.TryGetValue(id, out var e))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Сотрудник не найден в этом отделе");
+        }
+
+        var department = await db.Departments.AsNoTracking().Where(x => x.Id == d.Id)
+            .Select(x => new { x.Name, x.PresetId }).FirstAsync(ct);
+        var updatedAt = await db.Executors.AsNoTracking().Where(x => x.Id == id).Select(x => x.UpdatedAt).FirstAsync(ct);
+        var load = (await loads.GetLoadsAsync(balancer.Today(), ct)).GetValueOrDefault(id) ?? new ExecutorLoad(0, 0, 0);
+        var scores = await quality.GetAsync(d.Id, ct);
+        var week = await analytics.BuildAsync(d.Id, AnalyticsPeriod.Week, ct);
+        var weekMetrics = week.Executors.FirstOrDefault(m => m.Id == id);
+
+        // что умеет: все параметры сотрудника из справочника отдела, с правилами, где они участвуют
+        var rules = snapshot.Rules;
+        var skills = snapshot.Catalog.All
+            .Where(f => f.Owner == FieldOwner.Executor)
+            .OrderBy(f => f.Id)
+            .Select(f => new
+            {
+                f.Key,
+                f.Label,
+                Type = f.Type.ToString(),
+                Values = e.Values.TryGetValue(f.Key, out var v)
+                    ? (v.IsArray ? v.Items.ToArray() : [Display(v)])
+                    : [],
+                Rules = rules.Where(r => r.ExecutorField?.Key == f.Key || r.ExecutorFieldUpper?.Key == f.Key)
+                    .Select(r => r.Name).Distinct().ToArray(),
+            })
+            .ToList();
+
+        // активность по дням за неделю — по местному времени
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
+        var today = balancer.Today();
+        var fromDay = today.AddDays(-6);
+        var fromUtc = new DateTimeOffset(fromDay.ToDateTime(TimeOnly.MinValue), zone.GetUtcOffset(DateTime.UtcNow)).ToUniversalTime();
+        var fromBucket = ExecutorStats.HourOf(fromUtc);
+        var hours = await db.ExecutorHourStats.AsNoTracking()
+            .Where(s => s.ExecutorId == id && s.DepartmentId == d.Id && s.BucketHour >= fromBucket)
+            .ToListAsync(ct);
+        var days = Enumerable.Range(0, 7).Select(i => fromDay.AddDays(i)).Select(day =>
+        {
+            var rows = hours.Where(h =>
+                DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(ExecutorStats.HourStart(h.BucketHour), zone).DateTime) == day).ToList();
+            return new
+            {
+                Day = day,
+                Assigned = rows.Sum(r => r.AssignedCount),
+                Closed = rows.Sum(r => r.ClosedCount),
+                Points = rows.Sum(r => r.Points),
+            };
+        }).ToList();
+
+        var recent = await db.Assignments.AsNoTracking()
+            .Where(a => a.ExecutorId == id && a.DepartmentId == d.Id)
+            .OrderByDescending(a => a.Id).Take(15)
+            .Select(a => new { a.OrderId, a.Kind, a.OrderWeight, a.CreatedAt, a.IsCurrent })
+            .ToListAsync(ct);
+        var orderIds = recent.Select(r => r.OrderId).Distinct().ToList();
+        var orders = await db.Orders.AsNoTracking().Where(o => orderIds.Contains(o.Id))
+            .Select(o => new { o.Id, o.Status, o.Points, o.AttributesJson, o.ExecutorId })
+            .ToDictionaryAsync(o => o.Id, ct);
+
+        return Results.Ok(new
+        {
+            e.Id,
+            e.FullName,
+            e.IsActive,
+            Department = department.Name,
+            Sphere = DomainPresets.Find(department.PresetId)?.Title,
+            e.QualificationWeight,
+            e.DailyLimit,
+            e.ExtraPercent,
+            Extra = snapshot.Motivation.Extra(e, scores.GetValueOrDefault(id), 0m),
+            UpdatedAt = updatedAt,
+            Today = new { load.OpenCount, OpenWeight = load.OpenWeightMilli / 1000m, load.AssignedToday },
+            Quality = scores.GetValueOrDefault(id),
+            QualityThreshold = snapshot.Motivation.QualityThreshold,
+            Week = weekMetrics is null ? null : new
+            {
+                weekMetrics.Assigned, weekMetrics.Closed, weekMetrics.Returned, weekMetrics.Points, weekMetrics.Quality,
+                weekMetrics.FastClosed, weekMetrics.Extra, weekMetrics.Rank, weekMetrics.DeviationPercent,
+                Rated = week.Executors.Count(m => m.Rank is not null),
+            },
+            Skills = skills,
+            Days = days,
+            Recent = recent.Select(r =>
+            {
+                var order = orders.GetValueOrDefault(r.OrderId);
+                return new
+                {
+                    r.OrderId,
+                    Kind = r.Kind.ToString(),
+                    r.OrderWeight,
+                    r.CreatedAt,
+                    // заявка могла уйти другому — тогда статус не этого сотрудника
+                    Status = order is null ? null : order.ExecutorId == id ? order.Status.ToString() : "Moved",
+                    Points = order?.ExecutorId == id ? order.Points : null,
+                    Summary = OrderSummary(snapshot, order?.AttributesJson),
+                };
+            }),
+        });
     }
 
     private static async Task<IResult> OrderDetails(DepartmentScope d, long id, IBalancerDbContext db, CancellationToken ct)

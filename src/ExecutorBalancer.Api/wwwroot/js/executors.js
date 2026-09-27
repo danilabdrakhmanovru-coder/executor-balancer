@@ -1,7 +1,7 @@
 // Исполнители: кто есть, что умеет, насколько загружен. При включённом пульте — правка через АИС,
 // как в жизни: настройки исполнителей хранятся во внешней системе, балансировщик получает их от неё.
 import { api, problemText } from './api.js';
-import { $, el, badge, button, fmt, toast, field, input, checkbox, select } from './dom.js';
+import { $, el, badge, button, fmt, toast, field, input, checkbox, select, icon } from './dom.js';
 import { attributeForm } from './forms.js';
 import { openEditor } from './editor.js';
 import { todayCell } from './overview.js';
@@ -9,14 +9,20 @@ import { todayCell } from './overview.js';
 let demoEnabled = false;
 let thresholds = { qualityThreshold: 0.8, heavyQualityThreshold: 0.9 };
 
-export function setExecutorsEditable(enabled) { demoEnabled = enabled; }
+export function setExecutorsEditable(enabled) {
+  demoEnabled = enabled;
+  $('executor-add').classList.toggle('hidden', !enabled);
+}
 
 function card(e, source) {
   const card = el('div', null, `card executor${e.isActive ? '' : ' off'}`);
   const box = el('div', null, 'card-body');
   card.append(box);
   const head = el('div', null, 'executor-head');
-  head.append(el('strong', e.fullName), e.isActive ? badge('на работе', 'ok') : badge('не работает', 'bad'));
+  const link = el('a', e.fullName, 'executor-name');
+  link.href = `#executor-${e.id}`;
+  link.title = 'Открыть страницу сотрудника';
+  head.append(link, e.isActive ? badge('на работе', 'ok') : badge('не работает', 'bad'));
   box.append(head);
 
   const stats = el('div', null, 'executor-stats');
@@ -67,7 +73,7 @@ function qualityLine(e) {
 }
 
 /** Режим «готов взять больше нормы»: процент сверх нормы, не выше потолка отдела. */
-async function extraMode(e) {
+export async function extraMode(e, after = refreshExecutors) {
   const motivation = await api('/api/admin/motivation');
   const max = motivation.maxExtraPercent;
   const steps = [0, 10, 20, 30, 50, 100].filter((p) => p <= max);
@@ -84,45 +90,78 @@ async function extraMode(e) {
   ], async () => {
     await api(`/api/admin/executors/${e.id}/extra`, { method: 'PUT', body: { percent: Number(percent.value) } });
     toast(Number(percent.value) > 0 ? `${e.fullName}: режим «больше нормы» +${percent.value}%` : `${e.fullName}: режим выключен`);
-  }, refreshExecutors);
+  }, after);
 }
 
-async function setActive(e, active) {
+export async function setActive(e, active, after = refreshExecutors) {
   try {
     await api(`/api/admin/demo/executors/${e.id}/active`, { method: 'POST', body: { isActive: active } });
     toast(active ? `${e.fullName} вернулся — снова получает заявки`
       : `${e.fullName} ушёл — его открытые заявки перераспределяются между коллегами`);
-    setTimeout(refreshExecutors, 600);
+    setTimeout(after, 600);
   } catch (err) { toast(problemText(err), 'bad'); }
 }
 
-async function edit(source) {
-  const config = await api('/api/admin/config');
+/** Поля сотрудника: ФИО, квалификация, лимит, активность и параметры отдела (справочник). */
+function executorForm(config, source) {
   const form = attributeForm(config, 'Executor', source.attributes || {});
-  const name = input('text', source.fullName, { maxlength: '300', required: '' });
+  const name = input('text', source.fullName ?? '', { maxlength: '300', required: '', placeholder: 'Фамилия И. О.' });
   const qualification = input('number', source.qualificationWeight ?? 1, { min: '0.1', max: '100', step: '0.1' });
   const limit = input('number', source.dailyLimit ?? '', { min: '0', max: '100000', step: '1', placeholder: 'без лимита' });
-  const active = checkbox(source.isActive, 'На работе');
-  openEditor(`Исполнитель #${source.id}`, [
-    el('p', 'Изменения уходят в АИС, а она передаёт их балансировщику — так в жизни настройки исполнителей и меняются.', 'hint'),
-    field('ФИО', name),
-    field('Квалификация (вес)', qualification, 'Больше — опытнее: получает пропорционально больше нагрузки. 1 — обычный сотрудник.'),
-    field('Лимит заявок в день', limit, 'Пусто — без лимита.'),
-    active.wrap,
+  const active = checkbox(source.isActive ?? true, 'На работе');
+  return {
+    nodes: [
+      field('ФИО', name),
+      field('Квалификация (вес)', qualification, 'Больше — опытнее: получает пропорционально больше нагрузки. 1 — обычный сотрудник.'),
+      field('Суточная норма (лимит заявок в день)', limit, 'Пусто — без лимита.'),
+      active.wrap,
+      ...form.nodes,
+    ],
+    sample: () => form.sample(),
+    read: () => ({
+      fullName: name.value.trim(),
+      isActive: active.box.checked,
+      dailyLimit: limit.value === '' ? null : Number(limit.value),
+      qualificationWeight: Number(String(qualification.value).replace(',', '.')),
+      attributes: form.read(),
+    }),
+  };
+}
+
+export async function edit(source, after = refreshExecutors) {
+  const config = await api('/api/admin/config');
+  const form = executorForm(config, source);
+  openEditor(`Сотрудник #${source.id}`, [
+    el('p', 'Изменения уходят в АИС, а она передаёт их балансировщику — так в жизни настройки сотрудников и меняются.', 'hint'),
     ...form.nodes,
   ], async () => {
-    await api(`/api/admin/demo/executors/${source.id}`, {
-      method: 'PUT',
-      body: {
-        fullName: name.value.trim(),
-        isActive: active.box.checked,
-        dailyLimit: limit.value === '' ? null : Number(limit.value),
-        qualificationWeight: Number(String(qualification.value).replace(',', '.')),
-        attributes: form.read(),
-      },
-    });
+    await api(`/api/admin/demo/executors/${source.id}`, { method: 'PUT', body: form.read() });
     toast('Сохранено в АИС');
+  }, () => new Promise((r) => setTimeout(r, 500)).then(after));
+}
+
+/** Новый сотрудник отдела: заводится в АИС, АИС передаёт его балансировщику. */
+async function create() {
+  const config = await api('/api/admin/config');
+  const form = executorForm(config, {});
+  const sample = el('button', null, 'btn btn-sm');
+  sample.type = 'button';
+  sample.append(icon('wand'), 'Заполнить навыки примером');
+  sample.addEventListener('click', () => form.sample());
+  openEditor('Новый сотрудник', [
+    el('p', 'Сотрудник заводится в АИС (как в жизни — в кадровой или учётной системе), а АИС передаёт его сюда. '
+      + 'Навыки — параметры отдела: по ним правила решают, какие заявки ему подходят.', 'hint'),
+    sample,
+    ...form.nodes,
+  ], async () => {
+    const created = await api('/api/admin/demo/executors', { method: 'POST', body: form.read() });
+    toast(`Сотрудник заведён в АИС под номером ${created.id}`);
+    setTimeout(() => { location.hash = `#executor-${created.id}`; }, 700);
   }, () => new Promise((r) => setTimeout(r, 500)).then(refreshExecutors));
+}
+
+export function initExecutors() {
+  $('executor-add').addEventListener('click', () => { create().catch((e) => toast(problemText(e), 'bad')); });
 }
 
 export async function refreshExecutors() {

@@ -183,9 +183,18 @@
 
           <!-- Исполнители -->
           <section id="tab-executors" class="tab-page hidden">
-            <p class="page-hint">Сотрудники отдела, которых передала АИС: что умеют (параметры отдела), насколько загружены и
-              сколько получили сегодня. Заявка достаётся только тому, кто на работе и подходит по всем правилам.</p>
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+              <p class="page-hint mb-0">Сотрудники отдела, которых передала АИС: что умеют (параметры отдела), насколько загружены и
+                сколько получили сегодня. Щёлкните по имени — откроется страница сотрудника.</p>
+              <button id="executor-add" class="btn btn-primary hidden" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить сотрудника</button>
+            </div>
             <div id="executors-list" class="executors-grid"></div>
+          </section>
+
+          <!-- Страница сотрудника -->
+          <section id="tab-profile" class="tab-page hidden">
+            <a class="btn btn-sm" href="#executors"><svg class="icon"><use href="icons.svg#arrow-left"></use></svg>Все сотрудники</a>
+            <div id="profile"></div>
           </section>
 
           <!-- Обзор -->

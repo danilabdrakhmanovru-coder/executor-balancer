@@ -340,6 +340,64 @@ public sealed class OrderBalancer(
         return explanation;
     }
 
+    /// <summary>
+    /// Почему конкретному сотруднику подходит (или нет) заявка с такими параметрами: каждое правило по отдельности,
+    /// активность, суточная норма и нагрузка. Ничего не назначает. null — сотрудника в отделе нет.
+    /// </summary>
+    public async Task<ExecutorCheck?> CheckExecutorAsync(int departmentId, long executorId,
+        IReadOnlyDictionary<string, JsonElement> attributes, CancellationToken cancellationToken)
+    {
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
+        if (!snapshot.Executors.TryGetValue(executorId, out var executor))
+        {
+            return null;
+        }
+
+        var errors = new Dictionary<string, string[]>();
+        var values = snapshot.Catalog.Parse(FieldOwner.Order, attributes, errors);
+        if (errors.Count > 0)
+        {
+            throw new InvalidInputException(errors);
+        }
+
+        var weight = snapshot.OrderWeight(values);
+        var rules = snapshot.Rules.Select(rule => rule.Explain(values, executor.Values)).ToList();
+        var load = (await loadStore.GetLoadsAsync(Today(), cancellationToken)).GetValueOrDefault(executor.Id)
+                   ?? new ExecutorLoad(0, 0, 0);
+        var extra = (await ExtraDecisionsAsync(snapshot, [executor], weight, cancellationToken)).GetValueOrDefault(executor.Id);
+        var matches = rules.All(r => r.Passed);
+
+        string limit;
+        var withinLimit = true;
+        if (executor.DailyLimit is not { } norm)
+        {
+            limit = $"суточного лимита нет — сегодня получил {load.AssignedToday}";
+        }
+        else if (load.AssignedToday < norm)
+        {
+            limit = $"норма не набрана: {load.AssignedToday} из {norm}";
+        }
+        else if (extra?.ExtraLimit is { } cap && load.AssignedToday < cap)
+        {
+            limit = $"норма набрана ({load.AssignedToday} из {norm}), в режиме «больше нормы» — ещё до {cap}, только излишки";
+        }
+        else
+        {
+            withinLimit = false;
+            limit = $"суточный лимит исчерпан: {load.AssignedToday} из {extra?.ExtraLimit ?? norm}"
+                    + (extra?.Note is { } note ? $"; {note}" : "");
+        }
+
+        var qualification = LoadMath.ToMilli(executor.QualificationWeight);
+        var summary = !executor.IsActive ? "сейчас не на работе — заявки не получает"
+            : !matches ? "не подходит: не выполнено правило — см. отмеченное красным"
+            : !withinLimit ? "подходит по правилам, но суточный лимит исчерпан"
+            : "подходит: все правила выполнены, может получить заявку";
+        return new ExecutorCheck(executor.Id, executor.FullName, executor.IsActive, matches && executor.IsActive && withinLimit,
+            summary, rules, limit, weight, executor.QualificationWeight, load.OpenWeightMilli / 1000m,
+            LoadMath.Score(load.OpenWeightMilli, LoadMath.ToMilli(weight), qualification));
+    }
+
     /// <summary>Отбор по активности и правилам конструктора; отсеянные сразу попадают в объяснение.</summary>
     private static List<ExecutorProfile> MatchCandidates(BalancerSnapshot snapshot,
         IReadOnlyDictionary<string, FieldValue> values, AssignmentExplanation explanation)

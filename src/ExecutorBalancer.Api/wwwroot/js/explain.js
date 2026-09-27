@@ -1,5 +1,5 @@
 // Объяснение решения: кто рассматривался, почему отсеян, какой score, почему выбран.
-import { el, row, badge, fmt } from './dom.js';
+import { el, row, badge, fmt, icon } from './dom.js';
 
 export const KIND = {
   Primary: 'первичная', Parent: 'от родителя', Secondary: 'вторичная', Reassign: 'перераспределение', Extra: 'сверх нормы',
@@ -11,7 +11,10 @@ const VERDICT = {
   over_norm: ['норма набрана', 'warn'],
 };
 
-export function renderExplanation(x) {
+/**
+ * onCandidate(c) — если задан, имена сотрудников становятся кнопками: щелчок показывает разбор по правилам.
+ */
+export function renderExplanation(x, { onCandidate = null } = {}) {
   const wrap = el('div');
   wrap.append(el('h3', x.decision || 'Решение не принято', x.chosenExecutorId ? 'decision' : 'decision none'));
   const meta = [`вес заявки ${fmt(x.orderWeight)}`];
@@ -28,14 +31,63 @@ export function renderExplanation(x) {
     (order[a.verdict] ?? 9) - (order[b.verdict] ?? 9) || (a.score ?? 1e12) - (b.score ?? 1e12));
   for (const c of sorted) {
     const [label, cls] = VERDICT[c.verdict] || [c.verdict, ''];
-    body.append(row([c.name, badge(label, cls), c.score ?? '—', c.assignedToday ?? '—', el('span', c.reason || '', 'wrap-text')]));
+    let name = c.name;
+    if (onCandidate) {
+      name = el('button', null, 'btn btn-link p-0 candidate-link');
+      name.type = 'button';
+      name.title = 'Почему ему подходит или не подходит эта заявка';
+      name.append(el('span', c.name), icon('chevron-right'));
+      name.addEventListener('click', () => onCandidate(c));
+    }
+    body.append(row([name, badge(label, cls), c.score ?? '—', c.assignedToday ?? '—', el('span', c.reason || '', 'wrap-text')]));
   }
   table.append(head, body);
   const scroll = el('div', null, 'table-responsive');
   scroll.append(table);
   wrap.append(scroll);
+  if (onCandidate) wrap.append(el('p', 'Щёлкните по сотруднику — покажет каждое правило: что у заявки, что у него и выполнено ли.', 'hint'));
   wrap.append(el('p', 'Оценка = (вес заявок в работе у сотрудника + вес этой заявки) / его квалификация — то есть нагрузка после назначения. Выбирается наименьшая; при равенстве — '
     + 'меньше назначений за сутки на единицу квалификации, затем меньший номер сотрудника. Кто уже набрал норму, получает заявку '
     + 'сверх неё только в режиме «больше нормы» и только если у всех остальных норма набрана.', 'hint'));
+  return wrap;
+}
+
+/** Разбор для одного сотрудника: каждое правило отдельно, затем норма и нагрузка. */
+export function renderCheck(check) {
+  const wrap = el('div');
+  const head = el('div', null, 'check-head');
+  head.append(el('h3', check.name, 'mb-0'), badge(check.canTake ? 'может взять' : 'не может взять', check.canTake ? 'ok' : 'bad'));
+  wrap.append(head, el('p', check.summary, check.canTake ? 'decision' : 'decision none'));
+
+  const list = el('div', null, 'rule-checks');
+  if (!check.rules.length) list.append(el('p', 'В отделе нет правил подбора — подходит любой активный сотрудник.', 'muted'));
+  for (const r of check.rules) {
+    const item = el('div', null, `rule-check ${r.passed ? 'ok' : 'bad'}`);
+    const mark = el('span', null, 'rule-mark');
+    mark.append(icon(r.passed ? 'check' : 'x'));
+    const text = el('div');
+    text.append(el('strong', r.rule));
+    const line = el('div', null, 'rule-line');
+    line.append(
+      el('span', `${r.orderField} заявки: `), el('b', r.orderValue ?? 'не указано'),
+      el('span', ` — ${r.operator} — `),
+      el('span', r.source ? `${r.source} сотрудника: ` : ''), el('b', r.expected ?? 'не указано'),
+    );
+    text.append(line);
+    if (r.note) text.append(el('div', r.note, 'muted small'));
+    if (r.isStrict) text.append(badge('строгое', 'warn'));
+    item.append(mark, text);
+    list.append(item);
+  }
+  wrap.append(list);
+
+  const kv = el('div', null, 'kv mt-3');
+  for (const [k, v] of [['На работе', check.isActive ? 'да' : 'нет'], ['Норма на сегодня', check.limit],
+    ['Вес заявки', fmt(check.orderWeight)], ['Квалификация', fmt(check.qualification)],
+    ['Вес в работе сейчас', fmt(check.openWeight)], ['Оценка, если получит', fmt(check.score)]]) {
+    kv.append(el('span', k, 'muted'), el('span', v));
+  }
+  wrap.append(kv);
+  wrap.append(el('p', 'Из всех, кто может взять, заявка уходит тому, у кого оценка меньше: нагрузка на единицу квалификации после назначения.', 'hint'));
   return wrap;
 }

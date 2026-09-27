@@ -3,6 +3,7 @@ import { api } from './api.js';
 import { $, el, row, badge, fmt, fmtTime, deviation, emptyRow, tile } from './dom.js';
 import { columns } from './charts.js';
 import { KIND, renderExplanation } from './explain.js';
+import { showCheck } from './preview.js';
 
 let lastFeedId = 0;
 let liveLoadedAt = 0;
@@ -58,7 +59,9 @@ function renderExecutors(executors) {
   const max = Math.max(1, ...executors.filter((e) => e.isActive).map((e) => e.relativeLoad));
   $('executors').replaceChildren(...executors.map((e) => {
     const name = el('span');
-    name.append(el('span', `${e.fullName} `), e.isActive ? badge('активен', 'ok') : badge('неактивен', 'bad'));
+    const link = el('a', e.fullName, 'executor-name');
+    link.href = `#executor-${e.id}`;
+    name.append(link, ' ', e.isActive ? badge('активен', 'ok') : badge('неактивен', 'bad'));
     const bar = el('div', null, 'bar');
     const fill = el('span');
     fill.style.width = `${Math.min(100, (e.relativeLoad / max) * 100)}%`;
@@ -127,7 +130,10 @@ export async function openOrder(id) {
       body.append(el('p', 'Назначений пока нет.', 'muted'));
       return;
     }
-    body.append(renderExplanation(current.explanation));
+    // разбор по правилам — по текущим правилам отдела и параметрам этой заявки
+    body.append(renderExplanation(current.explanation, {
+      onCandidate: (c) => showCheck(c, order.attributes || {}, () => openOrder(id)),
+    }));
     if (order.history.length > 1) {
       body.append(el('p', `История назначений: ${order.history.map((h) => `${KIND[h.kind] || h.kind} → ${h.executorId}`).join(' · ')}`, 'muted'));
     }

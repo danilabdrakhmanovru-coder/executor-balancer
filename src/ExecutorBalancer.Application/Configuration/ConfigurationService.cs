@@ -234,6 +234,7 @@ public sealed class ConfigurationService(
             db.WeightRules.RemoveRange(await db.WeightRules.Where(r => r.DepartmentId == departmentId).ToListAsync(cancellationToken));
             db.FieldDefinitions.RemoveRange(await db.FieldDefinitions.Where(f => f.DepartmentId == departmentId).ToListAsync(cancellationToken));
             department.PresetId = preset.Id;
+            department.SphereTitle = null;
             await db.SaveChangesAsync(cancellationToken);
 
             db.FieldDefinitions.AddRange(fields);
