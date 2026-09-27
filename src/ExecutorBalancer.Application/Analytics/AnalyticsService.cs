@@ -142,7 +142,7 @@ public sealed class AnalyticsService(
         }
 
         var snapshot = await directory.GetAsync(departmentId, cancellationToken);
-        var qualification = snapshot.Executors.ToDictionary(e => e.Key, e => e.Value.QualificationWeight);
+        var qualificationAt = await QualificationHistoryAsync(snapshot, rows, pools, cancellationToken);
         var capped = LimitReached(rows, snapshot, offset, size);
         var fair = new Dictionary<long, decimal>();
         var poolsByWindow = pools.GroupBy(p => FloorDiv(p.BucketHour + offset, size)).ToDictionary(g => g.Key, g => g.ToList());
@@ -158,7 +158,8 @@ public sealed class AnalyticsService(
                 (poolsByWindow.GetValueOrDefault(window.Key) ?? [])
                     .GroupBy(p => p.SetKey)
                     .Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight))),
-                qualification, forced, caps);
+                // квалификация — та, что действовала в этом интервале: смена днём не искажает утренние часы
+                qualificationAt(ExecutorStats.HourStart(window.Key * size - offset).AddHours(size / 2d)), forced, caps);
             foreach (var (id, weight) in allocation)
             {
                 fair[id] = fair.GetValueOrDefault(id) + weight;
@@ -181,6 +182,40 @@ public sealed class AnalyticsService(
 
         return new AnalyticsReport(period, ExecutorStats.HourStart(fromHour), now, size, timeline, executors, kinds,
             Fairness(executors));
+    }
+
+    /// <summary>
+    /// Квалификация сотрудников на момент времени — по истории изменений (executor_qualifications).
+    /// Нет истории — текущее значение; момент раньше первой записи — первое известное значение.
+    /// </summary>
+    private async Task<Func<DateTimeOffset, IReadOnlyDictionary<long, decimal>>> QualificationHistoryAsync(
+        BalancerSnapshot snapshot, List<ExecutorHourStat> rows, List<EligibilityHourStat> pools, CancellationToken cancellationToken)
+    {
+        var current = snapshot.Executors.ToDictionary(e => e.Key, e => e.Value.QualificationWeight);
+        var ids = rows.Select(r => r.ExecutorId)
+            .Concat(pools.SelectMany(p => ExecutorStats.ParseSetKey(p.SetKey)))
+            .Distinct()
+            .ToList();
+        var history = (await db.ExecutorQualifications.AsNoTracking()
+                .Where(q => ids.Contains(q.ExecutorId))
+                .ToListAsync(cancellationToken))
+            .GroupBy(q => q.ExecutorId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(q => q.ValidFrom).ThenBy(q => q.Id).ToList());
+        if (history.Count == 0)
+        {
+            return _ => current;
+        }
+
+        return moment =>
+        {
+            var result = new Dictionary<long, decimal>(current);
+            foreach (var (id, changes) in history)
+            {
+                result[id] = (changes.LastOrDefault(q => q.ValidFrom <= moment) ?? changes[0]).Qualification;
+            }
+
+            return result;
+        };
     }
 
     /// <summary>Назначения по минутам за последние полчаса — для живого графика на обзоре.</summary>

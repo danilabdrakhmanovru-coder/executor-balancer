@@ -21,6 +21,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     public DbSet<ExecutorHourStat> ExecutorHourStats => Set<ExecutorHourStat>();
     public DbSet<EligibilityHourStat> EligibilityHourStats => Set<EligibilityHourStat>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<ExecutorQualification> ExecutorQualifications => Set<ExecutorQualification>();
 
     public bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
@@ -41,6 +42,13 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var model = modelBuilder;
+        model.Entity<ExecutorQualification>(e =>
+        {
+            e.ToTable("executor_qualifications");
+            e.Property(x => x.Qualification).HasPrecision(10, 3);
+            e.HasIndex(x => new { x.ExecutorId, x.ValidFrom });
+        });
+
         model.Entity<User>(e =>
         {
             e.ToTable("users");

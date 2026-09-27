@@ -19,6 +19,7 @@ public interface IBalancerDbContext
     DbSet<ExecutorHourStat> ExecutorHourStats { get; }
     DbSet<EligibilityHourStat> EligibilityHourStats { get; }
     DbSet<User> Users { get; }
+    DbSet<ExecutorQualification> ExecutorQualifications { get; }
 
     DatabaseFacade Database { get; }
 

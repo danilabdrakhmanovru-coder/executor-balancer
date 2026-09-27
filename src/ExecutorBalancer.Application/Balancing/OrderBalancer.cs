@@ -186,7 +186,8 @@ public sealed class OrderBalancer(
         }
 
         var (executor, wasActive, moved) = Apply(departmentId, incoming,
-            await db.Executors.FirstOrDefaultAsync(e => e.Id == incoming.Id, cancellationToken));
+            await db.Executors.FirstOrDefaultAsync(e => e.Id == incoming.Id, cancellationToken),
+            await db.ExecutorQualifications.AnyAsync(q => q.ExecutorId == incoming.Id, cancellationToken));
         await db.SaveChangesAsync(cancellationToken);
 
         await loadStore.SetActiveAsync(executor.Id, executor.IsActive, cancellationToken);
@@ -209,11 +210,14 @@ public sealed class OrderBalancer(
     {
         var ids = incoming.Select(e => e.Id).ToList();
         var existing = await db.Executors.Where(e => ids.Contains(e.Id)).ToDictionaryAsync(e => e.Id, cancellationToken);
+        var withHistory = (await db.ExecutorQualifications.Where(q => ids.Contains(q.ExecutorId))
+            .Select(q => q.ExecutorId).Distinct().ToListAsync(cancellationToken)).ToHashSet();
         var released = new List<long>();
         var saved = new List<Executor>();
         foreach (var item in incoming)
         {
-            var (executor, wasActive, moved) = Apply(departmentId, item, existing.GetValueOrDefault(item.Id));
+            var (executor, wasActive, moved) = Apply(departmentId, item, existing.GetValueOrDefault(item.Id),
+                withHistory.Contains(item.Id));
             saved.Add(executor);
             if ((wasActive && !executor.IsActive) || moved)
             {
@@ -244,14 +248,28 @@ public sealed class OrderBalancer(
     }
 
     /// <summary>Переносит данные из АИС или файла в сущность; новая — добавляется в контекст.</summary>
+    /// <param name="hasHistory">У сотрудника уже есть история квалификации (иначе прежнее значение — «с начала»).</param>
     private (Executor Executor, bool WasActive, bool Moved) Apply(int departmentId, IncomingExecutor incoming,
-        Executor? existing)
+        Executor? existing, bool hasHistory)
     {
+        var now = clock.GetUtcNow();
         var executor = existing;
         if (executor is null)
         {
             executor = new Executor { Id = incoming.Id, DepartmentId = departmentId };
             db.Executors.Add(executor);
+        }
+
+        // история квалификации: справедливая доля за прошлые часы считается по тогдашнему значению
+        var newQualification = incoming.QualificationWeight ?? executor.QualificationWeight;
+        if (existing is not null && !hasHistory)
+        {
+            AddQualification(executor.Id, existing.QualificationWeight, DateTimeOffset.UnixEpoch); // прежнее — «с начала»
+        }
+
+        if (existing is null || newQualification != existing.QualificationWeight)
+        {
+            AddQualification(executor.Id, newQualification, now);
         }
 
         var wasActive = executor.IsActive;
@@ -272,9 +290,15 @@ public sealed class OrderBalancer(
         }
 
         executor.AttributesJson = JsonSerializer.Serialize(incoming.Attributes);
-        executor.UpdatedAt = clock.GetUtcNow();
+        executor.UpdatedAt = now;
         return (executor, wasActive, moved);
     }
+
+    private void AddQualification(long executorId, decimal qualification, DateTimeOffset validFrom) =>
+        db.ExecutorQualifications.Add(new ExecutorQualification
+        {
+            ExecutorId = executorId, Qualification = qualification, ValidFrom = validFrom,
+        });
 
     /// <summary>Открытые заявки деактивированного исполнителя уходят другим.</summary>
     private async Task ReassignOpenOrdersAsync(long executorId, CancellationToken cancellationToken)
