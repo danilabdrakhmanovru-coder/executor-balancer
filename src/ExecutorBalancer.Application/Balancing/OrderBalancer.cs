@@ -128,6 +128,12 @@ public sealed class OrderBalancer(
             }
         }
 
+        db.OrderStatusChanges.Add(new OrderStatusChange
+        {
+            OrderId = order.Id, DepartmentId = order.DepartmentId, From = previousStatus, To = status,
+            ExecutorId = order.ExecutorId, At = now,
+        });
+
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             await db.SaveChangesAsync(cancellationToken);

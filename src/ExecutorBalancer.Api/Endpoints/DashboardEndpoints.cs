@@ -20,6 +20,7 @@ public static class DashboardEndpoints
             .AddEndpointFilter(DepartmentScope.RequireDepartment);
         group.MapGet("/summary", Summary);
         group.MapGet("/feed", Feed);
+        group.MapGet("/orders", OrderList);
         group.MapGet("/orders/{id:long}", OrderDetails);
         group.MapGet("/executors/{id:long}", ExecutorPage);
         group.MapGet("/live", (DepartmentScope d, AnalyticsService analytics, CancellationToken ct) => analytics.LiveAsync(d.Id, ct));
@@ -342,7 +343,78 @@ public static class DashboardEndpoints
         });
     }
 
-    private static async Task<IResult> OrderDetails(DepartmentScope d, long id, IBalancerDbContext db, CancellationToken ct)
+    /// <summary>Заявки отдела, новые сверху: фильтр по состоянию и счётчики для вкладок-фильтров.</summary>
+    /// <param name="state">all, pending (ждёт сотрудника), processed (в работе), await (на доработке), closed.</param>
+    private static async Task<IResult> OrderList(DepartmentScope d, string? state, long? before, int? limit,
+        IBalancerDbContext db, ExecutorDirectory directory, CancellationToken ct)
+    {
+        var orders = db.Orders.AsNoTracking().Where(o => o.DepartmentId == d.Id);
+        IQueryable<Order>? filtered = state switch
+        {
+            null or "" or "all" => orders,
+            "pending" => orders.Where(o => o.Status == OrderStatus.Processed && o.ExecutorId == null),
+            "processed" => orders.Where(o => o.Status == OrderStatus.Processed && o.ExecutorId != null),
+            "await" => orders.Where(o => o.Status == OrderStatus.Await),
+            "closed" => orders.Where(o => o.Status == OrderStatus.Accept || o.Status == OrderStatus.Reject),
+            _ => null,
+        };
+        if (filtered is null)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["state"] = ["допустимо: all, pending, processed, await, closed"],
+            });
+        }
+
+        if (before is { } beforeId)
+        {
+            filtered = filtered.Where(o => o.Id < beforeId);
+        }
+
+        var rows = await filtered.OrderByDescending(o => o.Id).Take(Math.Clamp(limit ?? 50, 1, 200))
+            .Select(o => new
+            {
+                o.Id, o.Status, o.ExecutorId, o.PendingReason, o.Weight, o.ReceivedAt, o.ClosedAt, o.Points,
+                o.AttributesJson, o.ReworkCount,
+            })
+            .ToListAsync(ct);
+        var counts = new
+        {
+            All = await orders.CountAsync(ct),
+            Pending = await orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId == null, ct),
+            Processed = await orders.CountAsync(o => o.Status == OrderStatus.Processed && o.ExecutorId != null, ct),
+            Await = await orders.CountAsync(o => o.Status == OrderStatus.Await, ct),
+            Closed = await orders.CountAsync(o => o.Status == OrderStatus.Accept || o.Status == OrderStatus.Reject, ct),
+        };
+        var snapshot = await directory.GetAsync(d.Id, ct);
+        var names = await ExecutorNamesAsync(db, snapshot, rows.Select(r => r.ExecutorId), ct);
+        return Results.Ok(new
+        {
+            Counts = counts,
+            Items = rows.Select(o => new
+            {
+                o.Id,
+                Status = o.Status.ToString(),
+                Waiting = o.Status == OrderStatus.Processed && o.ExecutorId is null,
+                o.ExecutorId,
+                ExecutorName = o.ExecutorId is { } e ? names.GetValueOrDefault(e) : null,
+                o.PendingReason,
+                o.Weight,
+                o.ReceivedAt,
+                o.ClosedAt,
+                o.Points,
+                o.ReworkCount,
+                Summary = OrderSummary(snapshot, o.AttributesJson),
+            }),
+        });
+    }
+
+    /// <summary>
+    /// Карточка заявки: параметры с названиями и путь от поступления до результата — поступила, кому и почему
+    /// назначена, доставлена ли в АИС, доработки, решение и балл. Каждое назначение — с полным объяснением.
+    /// </summary>
+    private static async Task<IResult> OrderDetails(DepartmentScope d, long id, IBalancerDbContext db,
+        ExecutorDirectory directory, CancellationToken ct)
     {
         var order = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id && o.DepartmentId == d.Id, ct);
         if (order is null)
@@ -350,10 +422,79 @@ public static class DashboardEndpoints
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Заявка не найдена");
         }
 
-        var history = await db.Assignments.AsNoTracking()
-            .Where(a => a.OrderId == id)
-            .OrderBy(a => a.Id)
-            .ToListAsync(ct);
+        var history = await db.Assignments.AsNoTracking().Where(a => a.OrderId == id).OrderBy(a => a.Id).ToListAsync(ct);
+        var deliveries = await db.OutboxMessages.AsNoTracking().Where(m => m.OrderId == id).OrderBy(m => m.Id).ToListAsync(ct);
+        var changes = await db.OrderStatusChanges.AsNoTracking().Where(c => c.OrderId == id).OrderBy(c => c.Id).ToListAsync(ct);
+        var snapshot = await directory.GetAsync(d.Id, ct);
+        var names = await ExecutorNamesAsync(db, snapshot,
+            history.Select(a => (long?)a.ExecutorId).Concat(deliveries.Select(m => (long?)m.ExecutorId)), ct);
+        string Name(long? executor) => executor is { } e ? names.GetValueOrDefault(e) ?? $"#{e}" : "—";
+
+        var values = snapshot.Catalog.ParseStored(FieldOwner.Order, order.AttributesJson);
+        var parameters = snapshot.Catalog.All
+            .Where(f => f.Owner == FieldOwner.Order && values.ContainsKey(f.Key))
+            .OrderBy(f => f.Id)
+            .Select(f => new { f.Label, Value = Display(values[f.Key]) })
+            .ToList();
+
+        var events = new List<TimelineEvent>
+        {
+            new(order.ReceivedAt, "received", "Поступила из АИС",
+                $"вес {order.Weight.ToString("0.###", CultureInfo.GetCultureInfo("ru-RU"))}" +
+                (order.ParentId is { } parent ? $" · связана с заявкой #{parent}" : "")),
+        };
+        foreach (var a in history)
+        {
+            var explanation = AssignmentExplanation.FromJson(a.ExplanationJson);
+            var suitable = explanation?.Candidates.Count(c => c.Verdict is "eligible" or "chosen" or "over_norm") ?? 0;
+            var total = explanation?.Candidates.Count ?? 0;
+            var title = a.Kind switch
+            {
+                AssignmentKind.Reassign => "Передана другому сотруднику",
+                AssignmentKind.Parent => "Назначена исполнителю родительской заявки",
+                AssignmentKind.Secondary => "После доработки — снова тому же сотруднику",
+                AssignmentKind.Extra => "Назначена сверх нормы",
+                _ => "Назначена сотруднику",
+            };
+            // от родителя и после доработки — без выбора: заявка идёт «своему» сотруднику
+            var choice = a.Kind is AssignmentKind.Parent or AssignmentKind.Secondary
+                ? "без выбора — продолжение уже начатой работы"
+                : $"могли взять {suitable} из {total}";
+            events.Add(new(a.CreatedAt, "assigned", title, $"{Name(a.ExecutorId)} · {choice}", a.Id, a.ExecutorId,
+                Name(a.ExecutorId)));
+        }
+
+        foreach (var m in deliveries)
+        {
+            events.Add(m.SentAt is { } sent
+                ? new(sent, "delivered", "Назначение доставлено в АИС", $"{Name(m.ExecutorId)} появится у сотрудника в АИС")
+                : new(m.CreatedAt, "delivering", "Доставляется в АИС",
+                    m.Attempts > 0 ? $"попыток: {m.Attempts}, повтор с растущей паузой" : "в очереди на отправку"));
+        }
+
+        foreach (var c in changes)
+        {
+            var (kind, title) = c.To switch
+            {
+                OrderStatus.Await => ("await", "Отправлена на доработку"),
+                OrderStatus.Accept => ("closed", "Решена"),
+                OrderStatus.Reject => ("closed", "Отклонена"),
+                _ => ("returned", c.From == OrderStatus.Await ? "Вернулась с доработки" : "Открыта заново"),
+            };
+            var text = c.ExecutorId is { } who ? $"у сотрудника {Name(who)}" : "";
+            if (kind == "closed" && order.Points is { } points && c == changes.Last())
+            {
+                text += $" · баллов в рейтинг: {points.ToString("0.###", CultureInfo.GetCultureInfo("ru-RU"))} (вес × качество)";
+            }
+
+            events.Add(new(c.At, kind, title, text.TrimStart(' ', '·')));
+        }
+
+        if (order.Status == OrderStatus.Processed && order.ExecutorId is null)
+        {
+            events.Add(new(DateTimeOffset.UtcNow, "waiting", "Ждёт подходящего сотрудника",
+                $"{order.PendingReason ?? "ожидает распределения"} — повтор каждые 5 секунд"));
+        }
 
         return Results.Ok(new
         {
@@ -362,13 +503,21 @@ public static class DashboardEndpoints
             Status = order.Status.ToString(),
             order.Weight,
             order.ExecutorId,
+            ExecutorName = order.ExecutorId is { } current ? Name(current) : null,
             order.PendingReason,
             order.ReceivedAt,
+            order.Points,
+            order.ReworkCount,
+            Summary = OrderSummary(snapshot, order.AttributesJson),
+            Parameters = parameters,
             Attributes = System.Text.Json.JsonDocument.Parse(order.AttributesJson).RootElement,
+            // порядок по времени; при равном — в порядке добавления (поступила → назначена → доставлена)
+            Timeline = events.Select((e, i) => (e, i)).OrderBy(x => x.e.At).ThenBy(x => x.i).Select(x => x.e),
             History = history.Select(a => new
             {
                 a.Id,
                 a.ExecutorId,
+                ExecutorName = Name(a.ExecutorId),
                 Kind = a.Kind.ToString(),
                 a.Score,
                 a.IsCurrent,
@@ -376,5 +525,28 @@ public static class DashboardEndpoints
                 Explanation = AssignmentExplanation.FromJson(a.ExplanationJson),
             }),
         });
+    }
+
+    /// <summary>Шаг пути заявки. AssignmentId — к какому назначению относится объяснение.</summary>
+    private sealed record TimelineEvent(DateTimeOffset At, string Kind, string Title, string Text,
+        long? AssignmentId = null, long? ExecutorId = null, string? ExecutorName = null);
+
+    /// <summary>Имена сотрудников: из снимка отдела, ушедших в другой отдел — из базы.</summary>
+    private static async Task<Dictionary<long, string>> ExecutorNamesAsync(IBalancerDbContext db, BalancerSnapshot snapshot,
+        IEnumerable<long?> ids, CancellationToken ct)
+    {
+        var wanted = ids.OfType<long>().Distinct().ToList();
+        var names = wanted.Where(snapshot.Executors.ContainsKey).ToDictionary(e => e, e => snapshot.Executors[e].FullName);
+        var missing = wanted.Where(e => !names.ContainsKey(e)).ToList();
+        if (missing.Count > 0)
+        {
+            foreach (var e in await db.Executors.AsNoTracking().Where(x => missing.Contains(x.Id))
+                         .Select(x => new { x.Id, x.FullName }).ToListAsync(ct))
+            {
+                names[e.Id] = e.FullName;
+            }
+        }
+
+        return names;
     }
 }

@@ -235,3 +235,36 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .sphere-heavy { display: grid; grid-template-columns: 120px 1fr 1fr; gap: 10px; }
 .sphere-summary { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
 @media (max-width: 640px) { .sphere-param-head, .sphere-heavy { grid-template-columns: 1fr; } }
+
+/* «Как это работает»: путь заявки и чек-лист */
+.path { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.path-step {
+  position: relative; display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: inherit;
+}
+.path-step:hover { border-color: var(--tblr-primary); }
+.path-step .icon { color: var(--tblr-primary); width: 22px; height: 22px; }
+.path-no { position: absolute; top: 10px; right: 12px; color: var(--muted); font-size: 12px; }
+.path-who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.path-title { font-weight: 600; line-height: 1.3; }
+.path-value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.path-note { font-size: 12px; color: var(--muted); }
+@media (max-width: 1100px) { .path { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .path { grid-template-columns: 1fr; } }
+.check-item { display: flex; gap: 12px; align-items: flex-start; }
+.check-mark { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; flex: none; color: #fff; }
+.check-mark.ok { background: var(--ok); }
+.check-mark.todo { background: var(--warn); }
+.check-mark .icon { width: 16px; height: 16px; }
+.roles dt { margin-top: 8px; }
+.roles dd { margin: 0; color: var(--muted); font-size: 13px; }
+
+/* путь заявки в карточке */
+.timeline { list-style: none; margin: 12px 0 0; padding: 0; }
+.timeline li { position: relative; padding: 0 0 14px 28px; }
+.timeline li::before { content: ""; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+.timeline li:last-child::before { display: none; }
+.timeline .dot { position: absolute; left: 2px; top: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--tblr-primary); }
+.timeline .dot.ok { background: var(--ok); } .timeline .dot.warn { background: var(--warn); } .timeline .dot.muted { background: var(--muted); }
+.timeline-time { font-size: 12px; color: var(--muted); }
+.timeline-title { font-weight: 600; }

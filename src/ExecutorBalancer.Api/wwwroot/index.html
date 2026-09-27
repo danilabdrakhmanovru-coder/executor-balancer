@@ -61,12 +61,14 @@
     <nav class="app-nav d-print-none">
       <div class="container-xl">
         <div class="app-tabs" id="tabs">
+          <button data-tab="start" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#route"></use></svg>Как это работает</button>
+          <button data-tab="orders" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#file-text"></use></svg>Заявки</button>
           <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Мониторинг</button>
           <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Сотрудники</button>
           <button data-tab="analytics" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Аналитика</button>
           <button data-tab="constructor" data-group="settings" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#settings"></use></svg>Настройки</button>
           <button data-tab="audit" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#history"></use></svg>Журнал</button>
-          <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Пульт эмулятора внешней системы — только для демонстрации"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Имитация АИС</button>
+          <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Заменяет настоящую АИС на демонстрации: создаёт заявки и сотрудников"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Тестовый стенд</button>
         </div>
       </div>
     </nav>
@@ -75,14 +77,80 @@
       <div class="page-body">
         <div class="container-xl">
 
-          <!-- Демонстрация -->
+          <!-- Как это работает -->
+          <section id="tab-start" class="tab-page hidden">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Путь заявки: от обращения клиента до результата</h3>
+                <div class="card-actions text-secondary">цифры — по выбранному отделу, щелчок по шагу — подробности</div>
+              </div>
+              <div class="card-body">
+                <div id="start-path" class="path"></div>
+              </div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-lg-7">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Готовность отдела</h3></div>
+                  <div class="list-group list-group-flush" id="start-checklist"></div>
+                </div>
+              </div>
+              <div class="col-lg-5">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Кто участвует</h3></div>
+                  <div class="card-body">
+                    <dl class="roles">
+                      <dt>Клиент</dt><dd>оставляет обращение во внешней системе компании (АИС: CRM, учётная система).</dd>
+                      <dt>АИС</dt><dd>сразу передаёт заявку и данные сотрудников сюда, получает назначение и показывает его сотруднику.
+                        На демонстрации её заменяет «Тестовый стенд».</dd>
+                      <dt>Этот сервис</dt><dd>за доли секунды выбирает сотрудника по правилам отдела и нагрузке и объясняет выбор.</dd>
+                      <dt>Сотрудник</dt><dd>работает с заявкой в АИС: решает, отклоняет или отправляет на доработку.</dd>
+                      <dt>Руководитель — вы</dt><dd>настраиваете правила отдела, следите за распределением, смотрите аналитику и рейтинг.</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Заявки -->
+          <section id="tab-orders" class="tab-page hidden">
+            <p class="page-hint">Все заявки отдела, новые сверху. Щёлкните по заявке — откроется её путь: когда пришла, кому и почему
+              назначена, доставлена ли в АИС, доработки, результат и баллы.</p>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div class="btn-group flex-wrap" id="orders-filter" role="group" aria-label="Состояние заявок">
+                <button class="btn" data-state="all" type="button">Все</button>
+                <button class="btn" data-state="pending" type="button">Ждут сотрудника</button>
+                <button class="btn" data-state="processed" type="button">В работе</button>
+                <button class="btn" data-state="await" type="button">На доработке</button>
+                <button class="btn" data-state="closed" type="button">Решены и отклонены</button>
+              </div>
+              <form id="orders-lookup" class="input-group lookup">
+                <input id="orders-lookup-id" class="form-control" type="number" min="1" placeholder="№ заявки">
+                <button type="submit" class="btn">Открыть</button>
+              </form>
+            </div>
+            <div class="card">
+              <div class="table-responsive">
+                <table class="table card-table table-vcenter table-hover">
+                  <thead><tr><th>№</th><th>Поступила</th><th>Что за заявка</th><th>Вес</th><th>Сотрудник</th><th>Состояние</th><th>Балл</th></tr></thead>
+                  <tbody id="orders-list"></tbody>
+                </table>
+              </div>
+              <div class="card-footer hidden" id="orders-more-wrap">
+                <button id="orders-more" class="btn w-100" type="button">Показать ещё</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Тестовый стенд (эмулятор АИС) -->
           <section id="tab-demo" class="tab-page hidden">
             <div class="card intro">
               <div class="card-body">
                 <div class="d-flex gap-3">
                   <span class="avatar avatar-md bg-primary-lt"><svg class="icon"><use href="icons.svg#info-circle"></use></svg></span>
                   <div>
-                    <h3 class="card-title mb-2">Пульт имитации АИС</h3>
+                    <h3 class="card-title mb-2">Тестовый стенд — вместо настоящей АИС</h3>
                     <p class="mb-2">Клиенты оставляют обращения во внешней системе компании — АИС (CRM, учётная система банка, склада,
                       магазина). АИС сразу передаёт каждое обращение сюда, и сервис за доли секунды решает, какому сотруднику его отдать:
                       только тем, кто сейчас работает и подходит по правилам из конструктора, а из них — тому, у кого меньше нагрузка
