@@ -177,7 +177,7 @@ public sealed class AiAnalyst(
                 field = f.Label,
                 values = f.Options.Where(o => o.Orders > 0 || o.Executors == 0).Select(o => new
                 {
-                    value = o.Value, o.Orders, o.SharePercent, o.Waiting, o.Reworked, o.Executors, o.CapacitySharePercent, o.Tension,
+                    value = o.Label ?? o.Value, o.Orders, o.SharePercent, o.Waiting, o.Reworked, o.Executors, o.CapacitySharePercent, o.Tension,
                 }),
             }),
             blocked = report.Blocked,

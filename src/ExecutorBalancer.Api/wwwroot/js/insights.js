@@ -55,7 +55,7 @@ function renderFields(fields) {
   const options = [...fields.find((f) => f.key === fieldKey).options]
     .sort((a, b) => b.orders - a.orders || a.executors - b.executors);
   $('in-options').replaceChildren(...options.map((o) => row([
-    o.value,
+    o.label || o.value,
     o.orders ? `${fmt(o.orders)} (${fmt(o.sharePercent)}%)` : '0',
     o.waiting ? badge(fmt(o.waiting), 'warn') : '0',
     fmt(o.reworked),

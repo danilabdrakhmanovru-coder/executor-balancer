@@ -4,6 +4,7 @@ import { api, problemText } from './api.js';
 import { openEditor as openShared } from './editor.js';
 import { $, el, row, badge, button, actions, fmt, toast, field, input, select, checkbox, emptyRow } from './dom.js';
 import { can } from './session.js';
+import { optionText } from './forms.js';
 
 const TYPE_LABEL = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
 const NUMERIC_OPS = ['greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual'];
@@ -45,7 +46,9 @@ function renderFields(owner, tbody) {
   const list = fieldsOf(owner);
   if (!list.length) { tbody.replaceChildren(emptyRow(6, 'Параметров нет')); return; }
   tbody.replaceChildren(...list.map((f) => {
-    const options = f.options.length ? f.options.join(', ') : '—';
+    // коды со своими подписями показываем как «Претензия (ORDER_3)»: видно и что на экране, и что шлёт АИС
+    const options = f.options.length
+      ? f.options.map((o) => (optionText(f, o) === o ? o : `${optionText(f, o)} (${o})`)).join(', ') : '—';
     const optionsCell = el('span', options.length > 160 ? `${options.slice(0, 159)}…` : options, 'wrap-text');
     optionsCell.title = options;
     return row([
@@ -141,7 +144,17 @@ function editField(existing, owner) {
   options.placeholder = 'по одному значению в строке или через запятую';
   options.value = (existing?.options || []).join('\n');
   const optionsField = field('Справочник значений', options, 'Для «справочника» и «списка». Пусто — любые значения.');
-  const sync = () => optionsField.classList.toggle('hidden', !['Enum', 'Array'].includes(type.value));
+  const labels = el('textarea', null, 'form-control');
+  labels.rows = 4;
+  labels.maxLength = 11000;
+  labels.placeholder = 'по одной подписи в строке, в том же порядке; пусто — показывать сами значения';
+  labels.value = (existing?.optionLabels || []).join('\n');
+  const labelsField = field('Подписи на экране', labels,
+    'Если значения — коды (например, ORDER_1 от АИС): люди увидят подписи, а правила и АИС работают с кодами.');
+  const sync = () => {
+    optionsField.classList.toggle('hidden', !['Enum', 'Array'].includes(type.value));
+    labelsField.classList.toggle('hidden', !['Enum', 'Array'].includes(type.value));
+  };
   type.addEventListener('change', sync);
   sync();
 
@@ -151,11 +164,15 @@ function editField(existing, owner) {
     field('Название', label),
     field('Тип', type, isNew ? 'После создания не меняется: АИС уже передаёт значения в этом формате.' : undefined),
     optionsField,
+    labelsField,
   ];
   openEditor(isNew ? 'Новый параметр' : `Параметр «${existing.label}»`, nodes, async () => {
     const body = {
       owner: ownerSelect.value, key: key.value.trim(), label: label.value.trim(), type: type.value,
       options: ['Enum', 'Array'].includes(type.value) ? parseOptions(options.value) : [],
+      // подписи — строго по строкам (запятая может быть внутри подписи); пустые строки — «без подписи»
+      optionLabels: ['Enum', 'Array'].includes(type.value) && labels.value.trim()
+        ? parseOptions(options.value).map((_, i) => (labels.value.split('\n')[i] || '').trim()) : [],
     };
     if (isNew) await api('/api/admin/fields', { method: 'POST', body });
     else await api(`/api/admin/fields/${existing.id}`, { method: 'PUT', body });
@@ -197,7 +214,7 @@ function valueEditor(orderField, op, current) {
   if (op === 'in' || op === 'notIn') {
     if (opts.length) {
       const selected = new Set(Array.isArray(current) ? current.map(String) : []);
-      const boxes = opts.map((o) => { const c = checkbox(selected.has(o), o); wrap.append(c.wrap); return [o, c.box]; });
+      const boxes = opts.map((o) => { const c = checkbox(selected.has(o), optionText(orderField, o)); wrap.append(c.wrap); return [o, c.box]; });
       wrap.classList.add('checks');
       return { node: wrap, read: () => {
         const values = boxes.filter(([, b]) => b.checked).map(([o]) => o);
@@ -215,7 +232,7 @@ function valueEditor(orderField, op, current) {
   }
 
   if (op === 'contains' && type === 'Array' && opts.length) {
-    const s = select(opts.map((o) => [o, o]), current);
+    const s = select(opts.map((o) => [o, optionText(orderField, o)]), current);
     wrap.append(s);
     return { node: wrap, read: () => s.value };
   }
@@ -233,7 +250,7 @@ function valueEditor(orderField, op, current) {
   }
 
   if (type === 'Enum' && opts.length && op !== 'contains') {
-    const s = select(opts.map((o) => [o, o]), current);
+    const s = select(opts.map((o) => [o, optionText(orderField, o)]), current);
     wrap.append(s);
     return { node: wrap, read: () => s.value };
   }

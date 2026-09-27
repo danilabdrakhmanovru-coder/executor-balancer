@@ -98,7 +98,7 @@ public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirecto
             csv.AppendLine(Row([
                 e.Id.ToString(CultureInfo.InvariantCulture), e.FullName, e.IsActive ? "да" : "нет",
                 e.DailyLimit?.ToString(CultureInfo.InvariantCulture) ?? "", e.QualificationWeight.ToString("0.###", Ru),
-                .. fields.Select(f => e.Values.TryGetValue(f.Key, out var v) ? Cell(v) : ""),
+                .. fields.Select(f => e.Values.TryGetValue(f.Key, out var v) ? Cell(f, v) : ""),
             ]));
         }
 
@@ -310,9 +310,16 @@ public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirecto
         FieldType.Number => TryNumber(text, out var n) ? JsonSerializer.SerializeToElement(n) : null,
         FieldType.Boolean => TryFlag(text, out var b) ? JsonSerializer.SerializeToElement(b) : null,
         FieldType.Array => JsonSerializer.SerializeToElement(text.Split([',', ';'],
-            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)),
-        _ => JsonSerializer.SerializeToElement(text),
+            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(item => Code(field, item))),
+        _ => JsonSerializer.SerializeToElement(Code(field, text)),
     };
+
+    /// <summary>В файле можно писать и код справочника (ORDER_3), и его подпись («Претензия») — в базу пишется код.</summary>
+    private static string Code(FieldDefinition field, string text)
+    {
+        var index = Array.FindIndex(field.OptionLabels, label => string.Equals(label, text.Trim(), StringComparison.OrdinalIgnoreCase));
+        return index >= 0 && index < field.Options.Length ? field.Options[index] : text;
+    }
 
     private static string Expected(FieldDefinition field) => field.Type switch
     {
@@ -346,20 +353,21 @@ public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirecto
 
     private static string Example(FieldDefinition field, int variant) => field.Type switch
     {
-        FieldType.Array => string.Join(", ", field.Options.Skip(variant).Take(2)),
-        FieldType.Enum => field.Options.Length > variant ? field.Options[variant] : "",
+        FieldType.Array => string.Join(", ", field.Options.Skip(variant).Take(2).Select(field.Show)),
+        FieldType.Enum => field.Options.Length > variant ? field.Show(field.Options[variant]) : "",
         FieldType.Number => variant == 0 ? "100" : "500",
         FieldType.Boolean => variant == 0 ? "да" : "нет",
         _ => "",
     };
 
-    private static string Cell(FieldValue value) => value.IsArray
-        ? string.Join(", ", value.Items)
+    // в шаблон — подписи значений (их понимает человек); при загрузке подписи превращаются обратно в коды
+    private static string Cell(FieldDefinition field, FieldValue value) => value.IsArray
+        ? string.Join(", ", value.Items.Select(field.Show))
         : value.Type switch
         {
             FieldType.Boolean => value.Flag ? "да" : "нет",
             FieldType.Number => value.Number.ToString("0.###", Ru),
-            _ => value.Text,
+            _ => field.Show(value.Text),
         };
 
     /// <summary>Строка CSV через «;»; ячейки, начинающиеся с = + - @, экранируются — чтобы Excel не счёл их формулой.</summary>

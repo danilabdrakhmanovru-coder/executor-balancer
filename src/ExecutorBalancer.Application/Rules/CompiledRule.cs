@@ -100,15 +100,15 @@ public sealed class CompiledRule
         }
 
         var expected = Operator == RuleOperator.Between
-            ? $"от {right?.ToString() ?? "−∞"} до {upper?.ToString() ?? "+∞"}"
-            : right?.ToString();
+            ? $"от {Right(right) ?? "−∞"} до {Right(upper) ?? "+∞"}"
+            : Right(right);
         var outcome = Check(order, executor);
         var missing = left is null || (Operator == RuleOperator.Between ? right is null && upper is null : right is null);
         var note = !missing ? null
             : IsStrict ? "значение не заполнено, а правило строгое"
             : left is null ? "у заявки значение не указано — правило не ограничивает"
             : "у исполнителя значение не указано — правило не ограничивает";
-        return new RuleExplanation(Name, OrderField.Label, left?.ToString(), OperatorText(Operator), source, expected,
+        return new RuleExplanation(Name, OrderField.Label, Left(left), OperatorText(Operator), source, expected,
             outcome.Passed, note, IsStrict);
     }
 
@@ -137,11 +137,21 @@ public sealed class CompiledRule
     private string Describe(FieldValue left, FieldValue? right, FieldValue? upper)
     {
         var expected = Operator == RuleOperator.Between
-            ? $"[{right?.ToString() ?? "−∞"}; {upper?.ToString() ?? "+∞"}]"
-            : right!.ToString();
+            ? $"[{Right(right) ?? "−∞"}; {Right(upper) ?? "+∞"}]"
+            : Right(right);
         var source = Target == RuleTarget.Constant ? "" : $" ({ExecutorField!.Label} исполнителя)";
-        return $"{Name}: у заявки {OrderField.Label} = {left}, требуется {OperatorText(Operator)} {expected}{source}";
+        return $"{Name}: у заявки {OrderField.Label} = {Left(left)}, требуется {OperatorText(Operator)} {expected}{source}";
     }
+
+    // значения для человека: коды справочника — подписями (ORDER_3 → «Претензия»); список — в квадратных скобках
+    private string? Left(FieldValue? value) => value is null ? null : Text(OrderField, value);
+
+    private string? Right(FieldValue? value) => value is null ? null
+        : Text(Target == RuleTarget.Constant ? OrderField : ExecutorField, value);
+
+    private static string Text(FieldDefinition? field, FieldValue value) => value.IsArray
+        ? "[" + string.Join(", ", FieldText.Items(field, value)) + "]"
+        : value.Type is FieldType.Enum or FieldType.String ? field?.Show(value.Text) ?? value.Text : value.ToString();
 
     public static string OperatorText(RuleOperator op) => op switch
     {

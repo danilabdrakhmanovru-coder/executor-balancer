@@ -19,6 +19,7 @@ public sealed record DemandTotals(
 /// <param name="Executors">Сколько активных сотрудников могут взять заявку с таким значением (по правилам на это поле).</param>
 /// <param name="CapacitySharePercent">Их доля в общей квалификации активных сотрудников.</param>
 /// <param name="Tension">Доля в заявках ÷ доля в квалификации: 1 — спрос и силы совпадают, 2 — заявок вдвое больше, чем сил.</param>
+/// <param name="Label">Как показать значение: подпись справочника (ORDER_3 → «Претензия») или само значение.</param>
 public sealed record DemandOption(
     string Value,
     int Orders,
@@ -27,7 +28,8 @@ public sealed record DemandOption(
     int Reworked,
     int Executors,
     decimal CapacitySharePercent,
-    decimal? Tension);
+    decimal? Tension,
+    string? Label = null);
 
 public sealed record DemandField(string Key, string Label, IReadOnlyList<DemandOption> Options);
 
@@ -143,7 +145,7 @@ public sealed class DemandAnalyzer(IBalancerDbContext db, ExecutorDirectory dire
                 var capacity = totalQualification > 0 ? Math.Round(capable.Sum(e => e.QualificationWeight) * 100m / totalQualification, 1) : 0m;
                 options.Add(new DemandOption(value, matching.Count, share, matching.Count(o => o.Waiting),
                     matching.Count(o => o.Reworked), capable.Count, capacity,
-                    capacity > 0 && matching.Count > 0 ? Math.Round(share / capacity, 2) : null));
+                    capacity > 0 && matching.Count > 0 ? Math.Round(share / capacity, 2) : null, field.Show(value)));
             }
 
             result.Add(new DemandField(field.Key, field.Label, options));
