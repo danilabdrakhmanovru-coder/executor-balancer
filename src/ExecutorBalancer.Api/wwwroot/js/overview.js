@@ -53,7 +53,7 @@ export function todayCell(e) {
 
 function renderExecutors(executors) {
   if (!executors.length) {
-    $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС (на демонстрации — вкладка «Имитация АИС»)'));
+    $('executors').replaceChildren(emptyRow(7, 'Сотрудников в отделе пока нет — их передаёт АИС (на демонстрации — «Тестовый стенд»)'));
     return;
   }
   const max = Math.max(1, ...executors.filter((e) => e.isActive).map((e) => e.relativeLoad));
@@ -94,7 +94,8 @@ async function refreshLive() {
   columns($('live-chart'), points.map((p) => ({
     label: new Date(p.minute).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
     value: p.assigned,
-  })));
+    title: 'назначено',
+  })), { empty: 'За последние полчаса назначений не было' });
   liveLoadedAt = Date.now();
 }
 
@@ -109,6 +110,13 @@ export async function refreshOverview() {
   if (Date.now() - liveLoadedAt > 10000) await refreshLive();
 }
 
+const EVENT_DOT = { received: '', assigned: '', delivered: 'ok', delivering: 'warn', await: 'warn', returned: '', closed: 'ok', waiting: 'warn' };
+const STATUS_TEXT = { Processed: 'в работе', Await: 'на доработке', Accept: 'решена', Reject: 'отклонена' };
+
+/**
+ * Карточка заявки — её путь от поступления до результата. У каждого назначения — «Почему он?»:
+ * полное объяснение, а из него — разбор по правилам для любого сотрудника.
+ */
 export async function openOrder(id) {
   const body = $('details-body');
   $('details-title').textContent = `Заявка #${id}`;
@@ -116,27 +124,40 @@ export async function openOrder(id) {
   if (!$('details').open) $('details').showModal();
   try {
     const order = await api(`/api/dashboard/orders/${encodeURIComponent(id)}`);
-    const kv = el('div', null, 'kv');
-    const attrs = Object.entries(order.attributes || {})
-      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ');
-    for (const [k, v] of [['Статус', order.status], ['Вес', fmt(order.weight)],
-      ['Родитель', order.parentId ? `#${order.parentId}` : '—'], ['Исполнитель', order.executorId ?? '—'],
-      ['Ожидание', order.pendingReason ?? '—'], ['Параметры', attrs || '—']]) {
-      kv.append(el('span', k, 'muted'), el('span', v));
+    const waiting = order.status === 'Processed' && !order.executorId;
+    const head = el('div', null, 'check-head');
+    head.append(el('strong', order.summary || 'параметры не заполнены'),
+      badge(waiting ? 'ждёт сотрудника' : STATUS_TEXT[order.status] || order.status, waiting ? 'warn' : order.status === 'Accept' ? 'ok' : ''));
+    if (order.executorName) head.append(el('span', `сотрудник: ${order.executorName}`, 'muted'));
+    const kv = el('div', null, 'kv mt-2');
+    for (const p of order.parameters) kv.append(el('span', p.label, 'muted'), el('span', p.value));
+    kv.append(el('span', 'Вес заявки', 'muted'), el('span', fmt(order.weight)));
+    if (order.parentId) kv.append(el('span', 'Родительская', 'muted'), el('span', `#${order.parentId}`));
+
+    const list = el('ol', null, 'timeline');
+    for (const e of order.timeline) {
+      const li = el('li');
+      li.append(el('span', null, `dot ${EVENT_DOT[e.kind] ?? ''}`),
+        el('div', e.kind === 'waiting' ? 'сейчас' : new Date(e.at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' }), 'timeline-time'),
+        el('div', e.title, 'timeline-title'), el('div', e.text, 'text-secondary'));
+      const assignment = e.assignmentId && order.history.find((h) => h.id === e.assignmentId);
+      if (assignment?.explanation) {
+        const why = el('button', 'Почему он? Кто ещё мог взять', 'btn btn-sm mt-1');
+        why.type = 'button';
+        const box = el('div', null, 'hidden mt-2');
+        why.addEventListener('click', () => {
+          if (!box.childElementCount) {
+            box.append(renderExplanation(assignment.explanation, {
+              onCandidate: (c) => showCheck(c, order.attributes || {}, () => openOrder(id)),
+            }));
+          }
+          box.classList.toggle('hidden');
+        });
+        li.append(why, box);
+      }
+      list.append(li);
     }
-    body.replaceChildren(kv);
-    const current = [...order.history].reverse().find((h) => h.isCurrent) || order.history[order.history.length - 1];
-    if (!current || !current.explanation) {
-      body.append(el('p', 'Назначений пока нет.', 'muted'));
-      return;
-    }
-    // разбор по правилам — по текущим правилам отдела и параметрам этой заявки
-    body.append(renderExplanation(current.explanation, {
-      onCandidate: (c) => showCheck(c, order.attributes || {}, () => openOrder(id)),
-    }));
-    if (order.history.length > 1) {
-      body.append(el('p', `История назначений: ${order.history.map((h) => `${KIND[h.kind] || h.kind} → ${h.executorId}`).join(' · ')}`, 'muted'));
-    }
+    body.replaceChildren(head, kv, el('h4', 'Путь заявки', 'mt-3 mb-0'), list);
   } catch (e) {
     body.replaceChildren(el('p', e.status === 404 ? 'В этом отделе такой заявки нет.' : 'Ошибка загрузки.', 'error'));
   }

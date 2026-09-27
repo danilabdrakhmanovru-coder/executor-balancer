@@ -128,6 +128,12 @@ public sealed class OrderBalancer(
             }
         }
 
+        db.OrderStatusChanges.Add(new OrderStatusChange
+        {
+            OrderId = order.Id, DepartmentId = order.DepartmentId, From = previousStatus, To = status,
+            ExecutorId = order.ExecutorId, At = now,
+        });
+
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
             await db.SaveChangesAsync(cancellationToken);
@@ -240,6 +246,9 @@ public sealed class OrderBalancer(
             executorId, orders.Count);
     }
 
+    /// <summary>Номер текущего часа: за него считается полученный вес — главный критерий выбора.</summary>
+    public long CurrentHour() => ExecutorStats.HourOf(clock.GetUtcNow());
+
     public DateOnly Today() =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.GetUtcNow(), _timeZone).DateTime);
 
@@ -260,7 +269,7 @@ public sealed class OrderBalancer(
 
         var explanation = new AssignmentExplanation { OrderWeight = snapshot.OrderWeight(values) };
         var matching = MatchCandidates(snapshot, values, explanation);
-        var loads = await loadStore.GetLoadsAsync(Today(), cancellationToken);
+        var loads = await loadStore.GetLoadsAsync(Today(), CurrentHour(), cancellationToken);
         var weight = LoadMath.ToMilli(explanation.OrderWeight);
 
         if (parentId is { } id)
@@ -304,11 +313,11 @@ public sealed class OrderBalancer(
             explanation.Candidates.Add(new(executor.Id, executor.FullName, tier == 0 ? "eligible" : "over_norm",
                 tier == 0 ? null : $"норма набрана ({load.AssignedToday} из {executor.DailyLimit}), в режиме «больше нормы» " +
                                    $"до {extra?.ExtraLimit} — берёт только излишки",
-                LoadMath.Score(load.OpenWeightMilli, weight, slot.QualificationMilli), load.AssignedToday));
+                LoadMath.Score(load.HourWeightMilli, weight, slot.QualificationMilli), load.AssignedToday));
             if (best[tier] is not { } current || LoadMath.IsBetter(weight,
-                    load.OpenWeightMilli, slot.QualificationMilli, load.AssignedToday, executor.Id,
-                    current.Load.OpenWeightMilli, LoadMath.ToMilli(current.Executor.QualificationWeight),
-                    current.Load.AssignedToday, current.Executor.Id))
+                    load.HourWeightMilli, load.OpenWeightMilli, slot.QualificationMilli, load.AssignedToday, executor.Id,
+                    current.Load.HourWeightMilli, current.Load.OpenWeightMilli,
+                    LoadMath.ToMilli(current.Executor.QualificationWeight), current.Load.AssignedToday, current.Executor.Id))
             {
                 best[tier] = (executor, load);
             }
@@ -323,7 +332,7 @@ public sealed class OrderBalancer(
             explanation.ChosenScore = explanation.Candidates.First(c => c.ExecutorId == winner.Id).Score;
             explanation.Decision = overNorm
                 ? $"{winner.FullName}: у всех подходящих норма на сегодня набрана, заявку берёт сверх нормы (режим «больше нормы»)"
-                : $"{winner.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})";
+                : $"{winner.FullName}: меньше всех получил за этот час среди подходящих (оценка {explanation.ChosenScore})";
         }
         else if (explanation.ChosenExecutorId is null)
         {
@@ -362,7 +371,7 @@ public sealed class OrderBalancer(
 
         var weight = snapshot.OrderWeight(values);
         var rules = snapshot.Rules.Select(rule => rule.Explain(values, executor.Values)).ToList();
-        var load = (await loadStore.GetLoadsAsync(Today(), cancellationToken)).GetValueOrDefault(executor.Id)
+        var load = (await loadStore.GetLoadsAsync(Today(), CurrentHour(), cancellationToken)).GetValueOrDefault(executor.Id)
                    ?? new ExecutorLoad(0, 0, 0);
         var extra = (await ExtraDecisionsAsync(snapshot, [executor], weight, cancellationToken)).GetValueOrDefault(executor.Id);
         var matches = rules.All(r => r.Passed);
@@ -395,7 +404,7 @@ public sealed class OrderBalancer(
             : "подходит: все правила выполнены, может получить заявку";
         return new ExecutorCheck(executor.Id, executor.FullName, executor.IsActive, matches && executor.IsActive && withinLimit,
             summary, rules, limit, weight, executor.QualificationWeight, load.OpenWeightMilli / 1000m,
-            LoadMath.Score(load.OpenWeightMilli, LoadMath.ToMilli(weight), qualification));
+            LoadMath.Score(load.HourWeightMilli, LoadMath.ToMilli(weight), qualification), load.HourWeightMilli / 1000m);
     }
 
     /// <summary>Отбор по активности и правилам конструктора; отсеянные сразу попадают в объяснение.</summary>
@@ -443,8 +452,8 @@ public sealed class OrderBalancer(
             var slot = new CandidateSlot(forced.Executor.Id, LoadMath.ToMilli(forced.Executor.QualificationWeight), null);
             // вернувшаяся с доработки заявка у того же исполнителя — не новая заявка за день
             var counts = forced.Kind != AssignmentKind.Secondary;
-            var forcedPick = await loadStore.PickAsync(new PickRequest(order.Id, weight, day, reopen, [slot], counts),
-                cancellationToken);
+            var forcedPick = await loadStore.PickAsync(new PickRequest(order.Id, weight, day, reopen, [slot], counts,
+                CurrentHour()), cancellationToken);
             if (forcedPick.Status == PickStatus.NoCandidate)
             {
                 explanation.Notes.Add($"{forced.Executor.FullName} стал неактивен в момент назначения, выбираем из остальных");
@@ -459,7 +468,7 @@ public sealed class OrderBalancer(
         var extras = await ExtraDecisionsAsync(snapshot, matching, order.Weight, cancellationToken);
         pick ??= await loadStore.PickAsync(new PickRequest(order.Id, weight, day, reopen,
             matching.Select(e => new CandidateSlot(e.Id, LoadMath.ToMilli(e.QualificationWeight), e.DailyLimit,
-                extras.GetValueOrDefault(e.Id)?.ExtraLimit)).ToList()),
+                extras.GetValueOrDefault(e.Id)?.ExtraLimit)).ToList(), Hour: CurrentHour()),
             cancellationToken);
 
         AddLoadReport(explanation, pick, matching, weight, extras);
@@ -507,7 +516,7 @@ public sealed class OrderBalancer(
             AssignmentKind.Secondary => $"{chosen.FullName} уже работал с этой заявкой",
             AssignmentKind.Extra =>
                 $"{chosen.FullName}: у всех подходящих норма на сегодня набрана, заявку берёт сверх нормы (режим «больше нормы»)",
-            _ => $"{chosen.FullName}: наименьшая нагрузка среди подходящих (оценка {explanation.ChosenScore})",
+            _ => $"{chosen.FullName}: меньше всех получил за этот час среди подходящих (оценка {explanation.ChosenScore})",
         };
         MarkChosen(explanation, executorId);
 
@@ -669,7 +678,7 @@ public sealed class OrderBalancer(
                 _ => null,
             };
             decimal? score = verdict is "eligible" or "over_norm"
-                ? LoadMath.Score(report.OpenWeightMilli, orderWeight, LoadMath.ToMilli(executor.QualificationWeight))
+                ? LoadMath.Score(report.HourWeightMilli, orderWeight, LoadMath.ToMilli(executor.QualificationWeight))
                 : null;
             explanation.Candidates.Add(new(executor.Id, executor.FullName, verdict, reason, score, report.AssignedToday));
         }

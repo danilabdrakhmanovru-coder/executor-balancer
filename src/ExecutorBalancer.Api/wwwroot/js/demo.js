@@ -1,4 +1,4 @@
-// Имитация АИС: пошаговый пульт для выбранного отдела (сотрудники → поток заявок → заявка вручную)
+// Тестовый стенд (вместо настоящей АИС): пошаговый пульт для выбранного отдела (сотрудники → поток заявок → заявка вручную)
 // и живая схема пути заявки. Управляет эмулятором АИС через балансировщик; у каждого отдела свой поток.
 import { api, problemText } from './api.js';
 import { $, el, input, field, toast, fmt, badge, icon } from './dom.js';
@@ -125,7 +125,7 @@ async function sendOrder() {
         return;
       }
     }
-    result.replaceChildren(el('p', `Заявка #${order.id} ещё в пути — посмотрите её на вкладке «Мониторинг».`, 'muted'));
+    result.replaceChildren(el('p', `Заявка #${order.id} ещё в пути — посмотрите её на вкладке «Заявки».`, 'muted'));
   } catch (e) {
     result.replaceChildren(el('p', e instanceof Error && !('status' in e) ? e.message : problemText(e), 'error'));
   } finally {

@@ -31,7 +31,7 @@ public sealed class AssignmentExplanation
 }
 
 /// <summary>Разбор «почему этому сотруднику подходит заявка»: правила по отдельности, норма, нагрузка.</summary>
-/// <param name="Score">Оценка, если бы заявка ушла ему: (вес в работе + вес заявки) / квалификация.</param>
+/// <param name="Score">Оценка, если бы заявка ушла ему: (вес за этот час + вес заявки) / квалификация.</param>
 public sealed record ExecutorCheck(
     long ExecutorId,
     string Name,
@@ -43,4 +43,5 @@ public sealed record ExecutorCheck(
     decimal OrderWeight,
     decimal Qualification,
     decimal OpenWeight,
-    decimal Score);
+    decimal Score,
+    decimal HourWeight = 0);

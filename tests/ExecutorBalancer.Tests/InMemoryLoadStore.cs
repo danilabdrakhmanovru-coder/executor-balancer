@@ -12,8 +12,9 @@ internal sealed class InMemoryLoadStore : ILoadStore
     private readonly Dictionary<long, long> _openWeight = new();
     private readonly Dictionary<long, int> _openCount = new();
     private readonly Dictionary<(DateOnly Day, long Executor), int> _daily = new();
+    private readonly Dictionary<(long Hour, long Executor), long> _hourWeight = new();
     private readonly Dictionary<long, bool> _active = new();
-    private readonly Dictionary<long, (long Executor, long Weight, string State, DateOnly Day, DateTimeOffset At, bool Counted)> _orders = new();
+    private readonly Dictionary<long, (long Executor, long Weight, string State, DateOnly Day, DateTimeOffset At, bool Counted, long Hour)> _orders = new();
     private long _version;
 
     public Task<PickResult> PickAsync(PickRequest request, CancellationToken cancellationToken)
@@ -27,30 +28,31 @@ internal sealed class InMemoryLoadStore : ILoadStore
 
             var report = new List<SlotReport>();
             // ярус 0 — норма не набрана, ярус 1 — сверх нормы (только если в ярусе 0 никого)
-            var best = new (CandidateSlot Slot, long Load, int Daily)?[2];
+            var best = new (CandidateSlot Slot, long Load, int Daily, long Hour)?[2];
             foreach (var slot in request.Candidates)
             {
                 var load = _openWeight.GetValueOrDefault(slot.ExecutorId);
                 var daily = _daily.GetValueOrDefault((request.Day, slot.ExecutorId));
+                var hour = _hourWeight.GetValueOrDefault((request.Hour, slot.ExecutorId));
                 if (!_active.GetValueOrDefault(slot.ExecutorId))
                 {
-                    report.Add(new SlotReport(slot.ExecutorId, "inactive", load, daily));
+                    report.Add(new SlotReport(slot.ExecutorId, "inactive", load, daily, hour));
                     continue;
                 }
 
                 if (slot.DailyLimit is not null && daily >= slot.Cap)
                 {
-                    report.Add(new SlotReport(slot.ExecutorId, "daily_limit_exceeded", load, daily));
+                    report.Add(new SlotReport(slot.ExecutorId, "daily_limit_exceeded", load, daily, hour));
                     continue;
                 }
 
                 var tier = slot.DailyLimit is { } limit && daily >= limit ? 1 : 0;
-                report.Add(new SlotReport(slot.ExecutorId, tier == 0 ? "eligible" : "over_norm", load, daily));
+                report.Add(new SlotReport(slot.ExecutorId, tier == 0 ? "eligible" : "over_norm", load, daily, hour));
                 if (best[tier] is not { } b || LoadMath.IsBetter(request.WeightMilli,
-                        load, slot.QualificationMilli, daily, slot.ExecutorId,
-                        b.Load, b.Slot.QualificationMilli, b.Daily, b.Slot.ExecutorId))
+                        hour, load, slot.QualificationMilli, daily, slot.ExecutorId,
+                        b.Hour, b.Load, b.Slot.QualificationMilli, b.Daily, b.Slot.ExecutorId))
                 {
-                    best[tier] = (slot, load, daily);
+                    best[tier] = (slot, load, daily, hour);
                 }
             }
 
@@ -59,17 +61,18 @@ internal sealed class InMemoryLoadStore : ILoadStore
                 return Task.FromResult(new PickResult(PickStatus.NoCandidate, null, report));
             }
 
-            var (bestSlot, bestLoad, bestDaily) = winner;
+            var (bestSlot, bestLoad, bestDaily, bestHour) = winner;
             var id = bestSlot.ExecutorId;
             _openWeight[id] = bestLoad + request.WeightMilli;
             _openCount[id] = _openCount.GetValueOrDefault(id) + 1;
+            _hourWeight[(request.Hour, id)] = bestHour + request.WeightMilli;
             if (request.CountsTowardDaily)
             {
                 _daily[(request.Day, id)] = bestDaily + 1;
             }
 
             var now = DateTimeOffset.UtcNow;
-            _orders[request.OrderId] = (id, request.WeightMilli, "open", request.Day, now, request.CountsTowardDaily);
+            _orders[request.OrderId] = (id, request.WeightMilli, "open", request.Day, now, request.CountsTowardDaily, request.Hour);
             return Task.FromResult(new PickResult(PickStatus.Assigned, id, report, now));
         }
     }
@@ -91,6 +94,12 @@ internal sealed class InMemoryLoadStore : ILoadStore
                 if (order.Counted && _daily.GetValueOrDefault(key) > 0)
                 {
                     _daily[key] -= 1;
+                }
+
+                var hourKey = (order.Hour, order.Executor);
+                if (_hourWeight.GetValueOrDefault(hourKey) >= order.Weight)
+                {
+                    _hourWeight[hourKey] -= order.Weight;
                 }
 
                 _orders.Remove(orderId);
@@ -123,7 +132,7 @@ internal sealed class InMemoryLoadStore : ILoadStore
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day,
+    public Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, long hour,
         CancellationToken cancellationToken)
     {
         lock (_gate)
@@ -131,7 +140,7 @@ internal sealed class InMemoryLoadStore : ILoadStore
             IReadOnlyDictionary<long, ExecutorLoad> result = _active.Keys.ToDictionary(
                 id => id,
                 id => new ExecutorLoad(_openWeight.GetValueOrDefault(id), _openCount.GetValueOrDefault(id),
-                    _daily.GetValueOrDefault((day, id))));
+                    _daily.GetValueOrDefault((day, id)), _hourWeight.GetValueOrDefault((hour, id))));
             return Task.FromResult(result);
         }
     }

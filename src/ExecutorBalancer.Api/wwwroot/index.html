@@ -61,12 +61,14 @@
     <nav class="app-nav d-print-none">
       <div class="container-xl">
         <div class="app-tabs" id="tabs">
+          <button data-tab="start" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#route"></use></svg>Как это работает</button>
+          <button data-tab="orders" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#file-text"></use></svg>Заявки</button>
           <button data-tab="overview" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#layout-dashboard"></use></svg>Мониторинг</button>
           <button data-tab="executors" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Сотрудники</button>
           <button data-tab="analytics" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#chart-bar"></use></svg>Аналитика</button>
           <button data-tab="constructor" data-group="settings" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#settings"></use></svg>Настройки</button>
           <button data-tab="audit" class="nav-link tab" type="button"><svg class="icon"><use href="icons.svg#history"></use></svg>Журнал</button>
-          <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Пульт эмулятора внешней системы — только для демонстрации"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Имитация АИС</button>
+          <button data-tab="demo" class="nav-link tab tab-demo hidden" id="tab-button-demo" type="button" title="Заменяет настоящую АИС на демонстрации: создаёт заявки и сотрудников"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Тестовый стенд</button>
         </div>
       </div>
     </nav>
@@ -75,14 +77,80 @@
       <div class="page-body">
         <div class="container-xl">
 
-          <!-- Демонстрация -->
+          <!-- Как это работает -->
+          <section id="tab-start" class="tab-page hidden">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Путь заявки: от обращения клиента до результата</h3>
+                <div class="card-actions text-secondary">цифры — по выбранному отделу, щелчок по шагу — подробности</div>
+              </div>
+              <div class="card-body">
+                <div id="start-path" class="path"></div>
+              </div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-lg-7">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Готовность отдела</h3></div>
+                  <div class="list-group list-group-flush" id="start-checklist"></div>
+                </div>
+              </div>
+              <div class="col-lg-5">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Кто участвует</h3></div>
+                  <div class="card-body">
+                    <dl class="roles">
+                      <dt>Клиент</dt><dd>оставляет обращение во внешней системе компании (АИС: CRM, учётная система).</dd>
+                      <dt>АИС</dt><dd>сразу передаёт заявку и данные сотрудников сюда, получает назначение и показывает его сотруднику.
+                        На демонстрации её заменяет «Тестовый стенд».</dd>
+                      <dt>Этот сервис</dt><dd>за доли секунды выбирает сотрудника по правилам отдела и нагрузке и объясняет выбор.</dd>
+                      <dt>Сотрудник</dt><dd>работает с заявкой в АИС: решает, отклоняет или отправляет на доработку.</dd>
+                      <dt>Руководитель — вы</dt><dd>настраиваете правила отдела, следите за распределением, смотрите аналитику и рейтинг.</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Заявки -->
+          <section id="tab-orders" class="tab-page hidden">
+            <p class="page-hint">Все заявки отдела, новые сверху. Щёлкните по заявке — откроется её путь: когда пришла, кому и почему
+              назначена, доставлена ли в АИС, доработки, результат и баллы.</p>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div class="btn-group flex-wrap" id="orders-filter" role="group" aria-label="Состояние заявок">
+                <button class="btn" data-state="all" type="button">Все</button>
+                <button class="btn" data-state="pending" type="button">Ждут сотрудника</button>
+                <button class="btn" data-state="processed" type="button">В работе</button>
+                <button class="btn" data-state="await" type="button">На доработке</button>
+                <button class="btn" data-state="closed" type="button">Решены и отклонены</button>
+              </div>
+              <form id="orders-lookup" class="input-group lookup">
+                <input id="orders-lookup-id" class="form-control" type="number" min="1" placeholder="№ заявки">
+                <button type="submit" class="btn">Открыть</button>
+              </form>
+            </div>
+            <div class="card">
+              <div class="table-responsive">
+                <table class="table card-table table-vcenter table-hover">
+                  <thead><tr><th>№</th><th>Поступила</th><th>Что за заявка</th><th>Вес</th><th>Сотрудник</th><th>Состояние</th><th>Балл</th></tr></thead>
+                  <tbody id="orders-list"></tbody>
+                </table>
+              </div>
+              <div class="card-footer hidden" id="orders-more-wrap">
+                <button id="orders-more" class="btn w-100" type="button">Показать ещё</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Тестовый стенд (эмулятор АИС) -->
           <section id="tab-demo" class="tab-page hidden">
             <div class="card intro">
               <div class="card-body">
                 <div class="d-flex gap-3">
                   <span class="avatar avatar-md bg-primary-lt"><svg class="icon"><use href="icons.svg#info-circle"></use></svg></span>
                   <div>
-                    <h3 class="card-title mb-2">Пульт имитации АИС</h3>
+                    <h3 class="card-title mb-2">Тестовый стенд — вместо настоящей АИС</h3>
                     <p class="mb-2">Клиенты оставляют обращения во внешней системе компании — АИС (CRM, учётная система банка, склада,
                       магазина). АИС сразу передаёт каждое обращение сюда, и сервис за доли секунды решает, какому сотруднику его отдать:
                       только тем, кто сейчас работает и подходит по правилам из конструктора, а из них — тому, у кого меньше нагрузка
@@ -240,7 +308,7 @@
                   </div>
                   <div class="table-responsive scroll">
                     <table class="table card-table table-vcenter table-hover">
-                      <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th title="Нагрузка сотрудника после назначения на единицу квалификации — выбирается наименьшая">Оценка</th></tr></thead>
+                      <thead><tr><th>Время</th><th>Заявка</th><th>Исполнитель</th><th>Тип</th><th title="Вес, полученный сотрудником за этот час вместе с этой заявкой, на единицу квалификации — выбирается наименьшая">Оценка</th></tr></thead>
                       <tbody id="feed"></tbody>
                     </table>
                   </div>
@@ -264,7 +332,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Динамика</h3>
-                <div class="card-actions legend"><i class="dot series-a"></i>назначено <i class="dot series-b"></i>решено и отклонено <i class="dot series-c"></i>на доработку</div>
+                <div class="card-actions legend"><i class="key series-a"></i>назначено <i class="key series-b"></i>решено и отклонено <i class="key series-c"></i>на доработку</div>
               </div>
               <div class="card-body"><div id="an-timeline" class="chart"></div></div>
             </div>
@@ -273,49 +341,56 @@
                 <div class="card h-100">
                   <div class="card-header">
                     <h3 class="card-title">Отклонение от справедливой доли</h3>
-                    <div class="card-actions text-secondary">норма — в пределах ±2%</div>
+                    <div class="card-actions text-secondary">кто получил больше или меньше, чем справедливо</div>
                   </div>
                   <div class="card-body">
                     <div id="an-deviation" class="chart"></div>
-                    <p class="text-secondary small mt-3 mb-0">Справедливый вес — идеально выровненное распределение того же потока заявок:
+                    <p class="text-secondary small mt-3 mb-0">Справедливый вес — идеально ровное распределение того же потока заявок:
                       нагрузка на единицу квалификации как можно ровнее с учётом того, кто какие заявки мог взять и кто в это время
-                      работал. Заявки от родителя и вторичные обязаны идти «своему» исполнителю — они учитываются как уже занятая
-                      часть нагрузки.</p>
+                      работал. Заявки от родителя, после доработки и сверх нормы идут «своему» сотруднику — они учтены как уже
+                      занятая часть нагрузки. Наведите на строку — покажет вес.</p>
                   </div>
                 </div>
               </div>
               <div class="col-lg-5">
                 <div class="card h-100">
-                  <div class="card-header"><h3 class="card-title">Типы назначений</h3></div>
+                  <div class="card-header">
+                    <h3 class="card-title">Как назначались заявки</h3>
+                    <div class="card-actions text-secondary">количество и доля</div>
+                  </div>
                   <div class="card-body"><div id="an-kinds" class="chart chart-small"></div></div>
                 </div>
               </div>
             </div>
-            <div class="row row-cards">
-              <div class="col-xl-7">
-                <div class="card h-100">
-                  <div class="card-header">
-                    <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#trophy"></use></svg>Рейтинг сотрудников</h3>
-                    <div class="card-actions text-secondary">балл = вес заявки × качество</div>
-                  </div>
-                  <div class="table-responsive scroll">
-                    <table class="table card-table table-vcenter">
-                      <thead>
-                        <tr><th>#</th><th>Сотрудник</th><th title="Сумма «вес × коэффициент качества» по закрытым заявкам">Баллы</th><th>Закрыто</th><th title="Баллы / максимально возможные баллы за те же заявки">Качество</th><th title="Закрыто подозрительно быстро">Быстрых</th><th title="Отправлено на доработку">Доработок</th><th title="Получено сверх нормы в режиме «больше нормы»">Сверх нормы</th></tr>
-                      </thead>
-                      <tbody id="an-rating"></tbody>
-                    </table>
-                  </div>
-                  <div class="card-footer text-secondary small" id="an-rating-hint"></div>
-                </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#trophy"></use></svg>Рейтинг сотрудников</h3>
+                <div class="card-actions text-secondary">балл = вес заявки × качество · место — при качестве не ниже порога</div>
               </div>
-              <div class="col-xl-5">
+              <div class="table-responsive">
+                <table class="table card-table table-vcenter rating-table">
+                  <thead>
+                    <tr><th class="w-1">Место</th><th>Сотрудник</th><th class="rating-points" title="Сумма «вес × коэффициент качества» по закрытым заявкам">Баллы</th><th class="text-end">Закрыто</th><th title="Баллы / максимально возможные баллы за те же заявки">Качество</th><th class="text-end" title="Отправлено на доработку">Доработок</th><th class="text-end" title="Закрыто подозрительно быстро">Быстрых</th><th class="text-end" title="Получено сверх нормы в режиме «больше нормы»">Сверх нормы</th></tr>
+                  </thead>
+                  <tbody id="an-rating"></tbody>
+                </table>
+              </div>
+              <div class="card-footer text-secondary small" id="an-rating-hint"></div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-xl-8">
                 <div class="card h-100">
                   <div class="card-header">
                     <h3 class="card-title">Количество против качества</h3>
-                    <div class="card-actions text-secondary">справа внизу — «работа на количество»</div>
+                    <div class="card-actions text-secondary">красная зона — много закрыто, но плохо</div>
                   </div>
                   <div class="card-body"><div id="an-scatter" class="chart"></div></div>
+                </div>
+              </div>
+              <div class="col-xl-4">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Требуют внимания</h3></div>
+                  <div class="list-group list-group-flush" id="an-attention"></div>
                 </div>
               </div>
             </div>

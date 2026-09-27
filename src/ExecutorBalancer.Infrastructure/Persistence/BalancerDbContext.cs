@@ -17,6 +17,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     public DbSet<WeightRule> WeightRules => Set<WeightRule>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<OrderStatusChange> OrderStatusChanges => Set<OrderStatusChange>();
     public DbSet<ExecutorHourStat> ExecutorHourStats => Set<ExecutorHourStat>();
     public DbSet<EligibilityHourStat> EligibilityHourStats => Set<EligibilityHourStat>();
 
@@ -66,6 +67,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.HasIndex(x => x.ParentId);
             e.HasIndex(x => new { x.Status, x.ExecutorId });
             e.HasIndex(x => new { x.DepartmentId, x.Status });
+            e.HasIndex(x => new { x.DepartmentId, x.Id }); // список заявок отдела, новые сверху
             e.HasOne<Department>().WithMany().HasForeignKey(x => x.DepartmentId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -124,6 +126,15 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
             e.ToTable("outbox_messages");
             e.Property(x => x.LastError).HasMaxLength(500);
             e.HasIndex(x => new { x.SentAt, x.NextAttemptAt });
+            e.HasIndex(x => x.OrderId); // доставка в АИС в карточке заявки
+        });
+
+        model.Entity<OrderStatusChange>(e =>
+        {
+            e.ToTable("order_status_changes");
+            e.Property(x => x.From).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.To).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(x => x.OrderId);
         });
 
         model.Entity<AuditEntry>(e =>

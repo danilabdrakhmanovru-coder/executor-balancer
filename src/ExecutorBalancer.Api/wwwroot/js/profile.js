@@ -112,8 +112,8 @@ function activity(p) {
   requestAnimationFrame(() => columns(chart, p.days.map((d) => ({
     label: new Date(`${d.day}T00:00:00`).toLocaleDateString('ru-RU', { weekday: 'short', day: '2-digit' }),
     value: d.assigned,
-    title: `${d.day}: назначено ${d.assigned}, закрыто ${d.closed}, баллов ${fmt(d.points)}`,
-  }))));
+    title: 'назначено',
+  })), { empty: 'За неделю назначений не было' }));
   return card;
 }
 

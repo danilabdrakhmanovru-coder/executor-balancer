@@ -17,11 +17,12 @@ public interface ILoadStore
 
     Task BumpConfigVersionAsync(CancellationToken cancellationToken);
 
-    /// <summary>Текущая нагрузка всех исполнителей — для дашборда.</summary>
-    Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, CancellationToken cancellationToken);
+    /// <summary>Текущая нагрузка всех исполнителей — для дашборда. hour — номер часа (unix-время / 3600).</summary>
+    Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, long hour, CancellationToken cancellationToken);
 }
 
-public sealed record ExecutorLoad(long OpenWeightMilli, int OpenCount, int AssignedToday);
+/// <param name="HourWeightMilli">Вес, полученный за текущий час, — главный критерий выбора.</param>
+public sealed record ExecutorLoad(long OpenWeightMilli, int OpenCount, int AssignedToday, long HourWeightMilli = 0);
 
 public enum LoadRelease
 {
@@ -45,10 +46,11 @@ public sealed record CandidateSlot(long ExecutorId, long QualificationMilli, int
 }
 
 /// <param name="Reopen">Заявка возвращается в рассмотрение: прежнее назначение можно заменить.</param>
+/// <param name="Hour">Номер текущего часа (unix-время / 3600): за него считается полученный вес.</param>
 /// <param name="CountsTowardDaily">Засчитать в суточную норму. Нет — та же заявка вернулась с доработки
 /// к тому же исполнителю: это не новая заявка за день.</param>
 public sealed record PickRequest(long OrderId, long WeightMilli, DateOnly Day, bool Reopen,
-    IReadOnlyList<CandidateSlot> Candidates, bool CountsTowardDaily = true);
+    IReadOnlyList<CandidateSlot> Candidates, bool CountsTowardDaily = true, long Hour = 0);
 
 public enum PickStatus
 {
@@ -59,7 +61,8 @@ public enum PickStatus
 
 /// <param name="Verdict">eligible, over_norm (норма набрана, но режим «больше нормы» позволяет ещё),
 /// inactive или daily_limit_exceeded.</param>
-public sealed record SlotReport(long ExecutorId, string Verdict, long OpenWeightMilli, int AssignedToday);
+public sealed record SlotReport(long ExecutorId, string Verdict, long OpenWeightMilli, int AssignedToday,
+    long HourWeightMilli = 0);
 
 /// <param name="HeldSince">С какого момента заявка закреплена за исполнителем в хранилище нагрузки.
 /// Для записей, восстановленных из базы, неизвестно.</param>
@@ -74,17 +77,26 @@ public static class LoadMath
 {
     public static long ToMilli(decimal value) => (long)Math.Round(value * 1000m, MidpointRounding.AwayFromZero);
 
-    public static decimal Score(long openWeightMilli, long orderWeightMilli, long qualificationMilli) =>
-        Math.Round((decimal)(openWeightMilli + orderWeightMilli) / qualificationMilli, 6);
+    /// <summary>Оценка кандидата: вес, полученный за час, вместе с этой заявкой — на единицу квалификации.</summary>
+    public static decimal Score(long hourWeightMilli, long orderWeightMilli, long qualificationMilli) =>
+        Math.Round((decimal)(hourWeightMilli + orderWeightMilli) / qualificationMilli, 6);
 
     /// <summary>
-    /// Лучше ли кандидат a, чем b. Порядок: меньший score → меньше назначений за сутки
-    /// на единицу квалификации → меньший идентификатор. Сравнение без деления.
+    /// Лучше ли кандидат a, чем b. Порядок: меньше веса за текущий час на единицу квалификации (то, что
+    /// отчёт сравнивает со справедливой долей) → меньше открытой нагрузки → меньше назначений за сутки →
+    /// меньший идентификатор. Сравнение без деления (перекрёстным умножением) — как в Lua-скрипте.
     /// </summary>
     public static bool IsBetter(long orderWeight,
-        long loadA, long qualA, long dailyA, long idA,
-        long loadB, long qualB, long dailyB, long idB)
+        long hourA, long loadA, long qualA, long dailyA, long idA,
+        long hourB, long loadB, long qualB, long dailyB, long idB)
     {
+        var hourLeft = (hourA + orderWeight) * qualB;
+        var hourRight = (hourB + orderWeight) * qualA;
+        if (hourLeft != hourRight)
+        {
+            return hourLeft < hourRight;
+        }
+
         var left = (loadA + orderWeight) * qualB;
         var right = (loadB + orderWeight) * qualA;
         if (left != right)

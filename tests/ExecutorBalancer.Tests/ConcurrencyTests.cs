@@ -58,6 +58,13 @@ public class ConcurrencyTests
     public void TieBreakingIsDeterministic(long loadA, long qualA, long dailyA, long idA,
         long loadB, long qualB, long dailyB, long idB, bool expected)
     {
-        Assert.Equal(expected, LoadMath.IsBetter(1000, loadA, qualA, dailyA, idA, loadB, qualB, dailyB, idB));
+        // за час получили поровну — решают открытая нагрузка, затем назначения за сутки, затем номер
+        Assert.Equal(expected, LoadMath.IsBetter(1000, 0, loadA, qualA, dailyA, idA, 0, loadB, qualB, dailyB, idB));
     }
+
+    [Theory]
+    [InlineData(2000L, 0L, 1000L, 3000L, false)] // A быстро закрывает (в работе пусто), но за час получил больше — не он
+    [InlineData(1000L, 5000L, 2000L, 0L, true)]  // A загружен сильнее, но за час получил меньше — он
+    public void HourWeightComesFirst(long hourA, long loadA, long hourB, long loadB, bool expected) =>
+        Assert.Equal(expected, LoadMath.IsBetter(1000, hourA, loadA, 1000, 0, 1, hourB, loadB, 1000, 0, 2));
 }

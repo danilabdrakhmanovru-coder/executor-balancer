@@ -17,5 +17,8 @@ internal static class RedisKeys
 
     public static RedisKey Daily(DateOnly day) => $"{{eb}}:daily:{day:yyyyMMdd}";
 
+    /// <summary>Вес, полученный каждым исполнителем за час (номер часа — unix-время / 3600).</summary>
+    public static RedisKey HourWeight(long hour) => $"{{eb}}:hour-weight:{hour}";
+
     public static RedisKey Order(long orderId) => $"{{eb}}:order:{orderId}";
 }

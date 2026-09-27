@@ -176,7 +176,7 @@ export async function refreshExecutors() {
   if (!summary.executors.length) {
     const empty = el('div', null, 'card card-body');
     empty.append(el('p', demoEnabled
-      ? 'В отделе пока нет сотрудников. Заведите их на вкладке «Имитация АИС» (шаг 1) — или их передаст АИС.'
+      ? 'В отделе пока нет сотрудников. Заведите их на «Тестовом стенде» (шаг 1) или кнопкой «Добавить сотрудника» — или их передаст АИС.'
       : 'В отделе пока нет сотрудников — их передаёт АИС.', 'muted'));
     list.replaceChildren(empty);
     return;

@@ -14,8 +14,12 @@ import { renderPresets } from './presets.js';
 import { initDepartments, loadDepartments } from './department.js';
 import { initDepartmentsAdmin, refreshDepartments } from './departments.js';
 import { initMotivation, refreshMotivation } from './motivation.js';
+import { refreshStart, setStartDemo } from './start.js';
+import { initOrders, refreshOrders } from './orders.js';
 
 const TABS = {
+  start: { refresh: refreshStart, every: 3000 },
+  orders: { refresh: refreshOrders, every: 5000 },
   overview: { refresh: refreshOverview, every: 2000 },
   executors: { refresh: refreshExecutors, every: 5000 },
   profile: { refresh: () => refreshProfile(profileId), every: 5000 },
@@ -39,7 +43,7 @@ const TABS = {
 // разделы «Настроек»: во вкладках одна кнопка, внутри — подменю
 const SETTINGS = ['constructor', 'motivation', 'preview', 'departments'];
 
-let active = 'overview';
+let active = 'start';
 let profileId = null;
 // страница сотрудника: #executor-15
 const PROFILE_HASH = /^executor-(\d{1,18})$/;
@@ -72,7 +76,7 @@ function schedule() {
 function show(tab) {
   const profile = PROFILE_HASH.exec(tab || '');
   if (profile) profileId = Number(profile[1]);
-  active = profile ? 'profile' : TABS[tab] && tab !== 'profile' && (tab !== 'demo' || demoEnabled) ? tab : 'overview';
+  active = profile ? 'profile' : TABS[tab] && tab !== 'profile' && (tab !== 'demo' || demoEnabled) ? tab : 'start';
   const inSettings = SETTINGS.includes(active);
   for (const b of $('tabs').querySelectorAll('.tab')) {
     b.classList.toggle('active', b.dataset.tab === active || (inSettings && b.dataset.group === 'settings')
@@ -105,6 +109,7 @@ async function showApp() {
   demoEnabled = await api('/api/admin/demo/status').then(() => true, (e) => e.status === 502);
   setExecutorsEditable(demoEnabled);
   setProfileEditable(demoEnabled);
+  setStartDemo(demoEnabled);
   $('tab-button-demo').classList.toggle('hidden', !demoEnabled);
   show(location.hash.slice(1));
 }
@@ -169,6 +174,7 @@ initConstructor(invalidateDemoConfig);
 initAudit();
 initDemo();
 initExecutors();
+initOrders();
 initDepartments(departmentChanged);
 initDepartmentsAdmin();
 initMotivation();

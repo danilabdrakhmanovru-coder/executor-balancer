@@ -14,10 +14,12 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
     private const int DailyTtlSeconds = 3 * 24 * 3600;
     private const int ClosedOrderTtlSeconds = 7 * 24 * 3600;
 
-    // KEYS: 1 open-weight, 2 open-count, 3 daily, 4 active, 5 order
+    // KEYS: 1 open-weight, 2 open-count, 3 daily, 4 active, 5 order, 6 hour-weight (вес, полученный за текущий час)
     // ARGV: 1 вес заявки, 2 reopen, 3 ttl дневного счётчика, 4 считать ли в суточную норму (1/0;
     //       0 — та же заявка вернулась к тому же исполнителю после доработки), далее четвёрки:
     //       id, квалификация, норма (суточный лимит, -1 — нет), потолок с режимом «больше нормы» (не меньше нормы)
+    // Лучший — у кого меньше веса, полученного за текущий час, на единицу квалификации (так же считается
+    // справедливая доля в отчётах); при равенстве — меньше открытой нагрузки, затем назначений за сутки, затем id.
     // Сначала выбираем среди тех, кто не набрал норму; сверх нормы (до потолка) — только если таких нет:
     // добровольцы получают излишки и не забирают заявки у коллег.
     // Ответ: статус, исполнитель, с какого момента заявка за ним (unix-секунды), далее строки отчёта.
@@ -30,24 +32,30 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
         local w = tonumber(ARGV[1])
         local best = {}
         local report = {}
-        local function consider(tier, id, load, q, daily)
+        local function consider(tier, id, hour, load, q, daily)
           local b = best[tier]
           local better = false
           if b == nil then
             better = true
           else
-            local lhs = (load + w) * b.q
-            local rhs = (b.load + w) * q
-            if lhs < rhs then
-              better = true
-            elseif lhs == rhs then
-              local dl = daily * b.q
-              local dr = b.daily * q
-              better = dl < dr or (dl == dr and tonumber(id) < tonumber(b.id))
+            local hl = (hour + w) * b.q
+            local hr = (b.hour + w) * q
+            if hl ~= hr then
+              better = hl < hr
+            else
+              local lhs = (load + w) * b.q
+              local rhs = (b.load + w) * q
+              if lhs ~= rhs then
+                better = lhs < rhs
+              else
+                local dl = daily * b.q
+                local dr = b.daily * q
+                better = dl < dr or (dl == dr and tonumber(id) < tonumber(b.id))
+              end
             end
           end
           if better then
-            best[tier] = {id = id, load = load, q = q, daily = daily}
+            best[tier] = {id = id, hour = hour, load = load, q = q, daily = daily}
           end
         end
         for i = 5, #ARGV, 4 do
@@ -57,16 +65,18 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
           local cap = tonumber(ARGV[i + 3])
           local daily = tonumber(redis.call('HGET', KEYS[3], id) or '0')
           local load = tonumber(redis.call('HGET', KEYS[1], id) or '0')
+          local hour = tonumber(redis.call('HGET', KEYS[6], id) or '0')
+          local tail = '|' .. load .. '|' .. daily .. '|' .. hour
           if redis.call('HGET', KEYS[4], id) ~= '1' then
-            report[#report + 1] = id .. '|inactive|' .. load .. '|' .. daily
+            report[#report + 1] = id .. '|inactive' .. tail
           elseif limit >= 0 and daily >= cap then
-            report[#report + 1] = id .. '|daily_limit_exceeded|' .. load .. '|' .. daily
+            report[#report + 1] = id .. '|daily_limit_exceeded' .. tail
           elseif limit >= 0 and daily >= limit then
-            report[#report + 1] = id .. '|over_norm|' .. load .. '|' .. daily
-            consider(2, id, load, q, daily)
+            report[#report + 1] = id .. '|over_norm' .. tail
+            consider(2, id, hour, load, q, daily)
           else
-            report[#report + 1] = id .. '|eligible|' .. load .. '|' .. daily
-            consider(1, id, load, q, daily)
+            report[#report + 1] = id .. '|eligible' .. tail
+            consider(1, id, hour, load, q, daily)
           end
         end
         local chosen = best[1] or best[2]
@@ -77,14 +87,16 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
         local now = redis.call('TIME')[1]
         redis.call('HINCRBY', KEYS[1], winner, w)
         redis.call('HINCRBY', KEYS[2], winner, 1)
+        redis.call('HINCRBY', KEYS[6], winner, w)
+        redis.call('EXPIRE', KEYS[6], 7200)
         local day = ''
         if ARGV[4] == '1' then
           redis.call('HINCRBY', KEYS[3], winner, 1)
           redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
           day = KEYS[3]
         end
-        -- day: какой суточный счётчик увеличен (пусто — никакой) — откат должен вернуть именно его
-        redis.call('HSET', KEYS[5], 'executor', winner, 'weight', w, 'state', 'open', 'at', now, 'day', day)
+        -- day и hour: какие счётчики увеличены (day пусто — никакой) — откат должен вернуть именно их
+        redis.call('HSET', KEYS[5], 'executor', winner, 'weight', w, 'state', 'open', 'at', now, 'day', day, 'hour', KEYS[6])
         redis.call('PERSIST', KEYS[5])
         return {'assigned', winner, now, unpack(report)}
         """;
@@ -105,6 +117,10 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
           local day = redis.call('HGET', KEYS[3], 'day')
           if day and day ~= '' and tonumber(redis.call('HGET', day, executor) or '0') > 0 then
             redis.call('HINCRBY', day, executor, -1)
+          end
+          local hour = redis.call('HGET', KEYS[3], 'hour')
+          if hour and hour ~= '' and tonumber(redis.call('HGET', hour, executor) or '0') >= w then
+            redis.call('HINCRBY', hour, executor, -w)
           end
           redis.call('DEL', KEYS[3])
         else
@@ -138,7 +154,7 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
         RedisKey[] keys =
         [
             RedisKeys.OpenWeight, RedisKeys.OpenCount, RedisKeys.Daily(request.Day), RedisKeys.Active,
-            RedisKeys.Order(request.OrderId),
+            RedisKeys.Order(request.OrderId), RedisKeys.HourWeight(request.Hour),
         ];
         var raw = (RedisResult[])(await Db.ScriptEvaluateAsync(PickScript, keys, args.ToArray()))!;
 
@@ -185,22 +201,24 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
     public Task BumpConfigVersionAsync(CancellationToken cancellationToken) =>
         Db.StringIncrementAsync(RedisKeys.ConfigVersion);
 
-    public async Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day,
+    public async Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, long hour,
         CancellationToken cancellationToken)
     {
         var db = Db;
         var weights = db.HashGetAllAsync(RedisKeys.OpenWeight);
         var counts = db.HashGetAllAsync(RedisKeys.OpenCount);
         var daily = db.HashGetAllAsync(RedisKeys.Daily(day));
-        await Task.WhenAll(weights, counts, daily);
+        var hourly = db.HashGetAllAsync(RedisKeys.HourWeight(hour));
+        await Task.WhenAll(weights, counts, daily, hourly);
 
         var weightMap = ToMap(await weights);
         var countMap = ToMap(await counts);
         var dailyMap = ToMap(await daily);
-        return weightMap.Keys.Union(countMap.Keys).Union(dailyMap.Keys).ToDictionary(
+        var hourMap = ToMap(await hourly);
+        return weightMap.Keys.Union(countMap.Keys).Union(dailyMap.Keys).Union(hourMap.Keys).ToDictionary(
             id => id,
             id => new ExecutorLoad(weightMap.GetValueOrDefault(id), (int)countMap.GetValueOrDefault(id),
-                (int)dailyMap.GetValueOrDefault(id)));
+                (int)dailyMap.GetValueOrDefault(id), hourMap.GetValueOrDefault(id)));
     }
 
     private static Dictionary<long, long> ToMap(HashEntry[] entries) =>
@@ -213,6 +231,7 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
             long.Parse(parts[0], CultureInfo.InvariantCulture),
             parts[1],
             long.Parse(parts[2], CultureInfo.InvariantCulture),
-            int.Parse(parts[3], CultureInfo.InvariantCulture));
+            int.Parse(parts[3], CultureInfo.InvariantCulture),
+            long.Parse(parts[4], CultureInfo.InvariantCulture));
     }
 }

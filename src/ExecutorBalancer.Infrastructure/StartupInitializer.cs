@@ -1,3 +1,4 @@
+using ExecutorBalancer.Application.Analytics;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Domain;
 using ExecutorBalancer.Infrastructure.Persistence;
@@ -83,6 +84,13 @@ internal sealed class StartupInitializer(
             .Where(o => o.Status == OrderStatus.Processed && o.ExecutorId != null)
             .Select(o => new { o.Id, ExecutorId = o.ExecutorId!.Value, o.Weight })
             .ToListAsync(cancellationToken);
+        var hour = ExecutorStats.HourOf(clock.GetUtcNow());
+        var hourStart = ExecutorStats.HourStart(hour);
+        var thisHour = await db.Assignments.AsNoTracking()
+            .Where(a => a.CreatedAt >= hourStart)
+            .GroupBy(a => a.ExecutorId)
+            .Select(g => new { ExecutorId = g.Key, Weight = g.Sum(a => a.OrderWeight) })
+            .ToListAsync(cancellationToken);
         var today = await db.Assignments.AsNoTracking()
             .Where(a => a.CreatedAt >= dayStart && a.Kind != AssignmentKind.Secondary) // возвраты с доработки — не новые заявки
             .GroupBy(a => a.ExecutorId)
@@ -90,7 +98,13 @@ internal sealed class StartupInitializer(
             .ToListAsync(cancellationToken);
 
         var batch = cache.CreateTransaction();
-        _ = batch.KeyDeleteAsync([RedisKeys.OpenWeight, RedisKeys.OpenCount, RedisKeys.Daily(day)]);
+        _ = batch.KeyDeleteAsync([RedisKeys.OpenWeight, RedisKeys.OpenCount, RedisKeys.Daily(day), RedisKeys.HourWeight(hour)]);
+        foreach (var row in thisHour)
+        {
+            _ = batch.HashSetAsync(RedisKeys.HourWeight(hour), row.ExecutorId, LoadMath.ToMilli(row.Weight));
+        }
+
+        _ = batch.KeyExpireAsync(RedisKeys.HourWeight(hour), TimeSpan.FromHours(2));
         foreach (var group in open.GroupBy(o => o.ExecutorId))
         {
             _ = batch.HashSetAsync(RedisKeys.OpenWeight, group.Key, group.Sum(o => LoadMath.ToMilli(o.Weight)));

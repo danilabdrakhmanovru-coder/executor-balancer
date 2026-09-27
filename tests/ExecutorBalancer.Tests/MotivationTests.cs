@@ -47,6 +47,21 @@ public class MotivationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StatusChangesAreRecordedForOrderPath()
+    {
+        await _f.AddExecutor(1);
+        await _f.Receive(1);
+        await _f.ChangeStatus(1, OrderStatus.Await);
+        await _f.ChangeStatus(1, OrderStatus.Processed);
+        await _f.ChangeStatus(1, OrderStatus.Accept);
+        await _f.ChangeStatus(1, OrderStatus.Accept); // повтор из АИС — без новой записи
+
+        var path = await _f.Query(db => db.OrderStatusChanges.AsNoTracking().Where(c => c.OrderId == 1).OrderBy(c => c.Id)
+            .Select(c => c.To).ToListAsync());
+        Assert.Equal([OrderStatus.Await, OrderStatus.Processed, OrderStatus.Accept], path);
+    }
+
+    [Fact]
     public async Task FastCloseLowersQuality()
     {
         await SetMotivation(Defaults with { FastCloseSeconds = 3600 }); // любое закрытие в тесте — «слишком быстрое»
