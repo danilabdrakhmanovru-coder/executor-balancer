@@ -94,7 +94,8 @@ async function refreshLive() {
   columns($('live-chart'), points.map((p) => ({
     label: new Date(p.minute).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
     value: p.assigned,
-  })));
+    title: 'назначено',
+  })), { empty: 'За последние полчаса назначений не было' });
   liveLoadedAt = Date.now();
 }
 

@@ -332,7 +332,7 @@
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Динамика</h3>
-                <div class="card-actions legend"><i class="dot series-a"></i>назначено <i class="dot series-b"></i>решено и отклонено <i class="dot series-c"></i>на доработку</div>
+                <div class="card-actions legend"><i class="key series-a"></i>назначено <i class="key series-b"></i>решено и отклонено <i class="key series-c"></i>на доработку</div>
               </div>
               <div class="card-body"><div id="an-timeline" class="chart"></div></div>
             </div>
@@ -341,49 +341,56 @@
                 <div class="card h-100">
                   <div class="card-header">
                     <h3 class="card-title">Отклонение от справедливой доли</h3>
-                    <div class="card-actions text-secondary">норма — в пределах ±2%</div>
+                    <div class="card-actions text-secondary">кто получил больше или меньше, чем справедливо</div>
                   </div>
                   <div class="card-body">
                     <div id="an-deviation" class="chart"></div>
-                    <p class="text-secondary small mt-3 mb-0">Справедливый вес — идеально выровненное распределение того же потока заявок:
+                    <p class="text-secondary small mt-3 mb-0">Справедливый вес — идеально ровное распределение того же потока заявок:
                       нагрузка на единицу квалификации как можно ровнее с учётом того, кто какие заявки мог взять и кто в это время
-                      работал. Заявки от родителя и вторичные обязаны идти «своему» исполнителю — они учитываются как уже занятая
-                      часть нагрузки.</p>
+                      работал. Заявки от родителя, после доработки и сверх нормы идут «своему» сотруднику — они учтены как уже
+                      занятая часть нагрузки. Наведите на строку — покажет вес.</p>
                   </div>
                 </div>
               </div>
               <div class="col-lg-5">
                 <div class="card h-100">
-                  <div class="card-header"><h3 class="card-title">Типы назначений</h3></div>
+                  <div class="card-header">
+                    <h3 class="card-title">Как назначались заявки</h3>
+                    <div class="card-actions text-secondary">количество и доля</div>
+                  </div>
                   <div class="card-body"><div id="an-kinds" class="chart chart-small"></div></div>
                 </div>
               </div>
             </div>
-            <div class="row row-cards">
-              <div class="col-xl-7">
-                <div class="card h-100">
-                  <div class="card-header">
-                    <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#trophy"></use></svg>Рейтинг сотрудников</h3>
-                    <div class="card-actions text-secondary">балл = вес заявки × качество</div>
-                  </div>
-                  <div class="table-responsive scroll">
-                    <table class="table card-table table-vcenter">
-                      <thead>
-                        <tr><th>#</th><th>Сотрудник</th><th title="Сумма «вес × коэффициент качества» по закрытым заявкам">Баллы</th><th>Закрыто</th><th title="Баллы / максимально возможные баллы за те же заявки">Качество</th><th title="Закрыто подозрительно быстро">Быстрых</th><th title="Отправлено на доработку">Доработок</th><th title="Получено сверх нормы в режиме «больше нормы»">Сверх нормы</th></tr>
-                      </thead>
-                      <tbody id="an-rating"></tbody>
-                    </table>
-                  </div>
-                  <div class="card-footer text-secondary small" id="an-rating-hint"></div>
-                </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title"><svg class="icon me-1"><use href="icons.svg#trophy"></use></svg>Рейтинг сотрудников</h3>
+                <div class="card-actions text-secondary">балл = вес заявки × качество · место — при качестве не ниже порога</div>
               </div>
-              <div class="col-xl-5">
+              <div class="table-responsive">
+                <table class="table card-table table-vcenter rating-table">
+                  <thead>
+                    <tr><th class="w-1">Место</th><th>Сотрудник</th><th class="rating-points" title="Сумма «вес × коэффициент качества» по закрытым заявкам">Баллы</th><th class="text-end">Закрыто</th><th title="Баллы / максимально возможные баллы за те же заявки">Качество</th><th class="text-end" title="Отправлено на доработку">Доработок</th><th class="text-end" title="Закрыто подозрительно быстро">Быстрых</th><th class="text-end" title="Получено сверх нормы в режиме «больше нормы»">Сверх нормы</th></tr>
+                  </thead>
+                  <tbody id="an-rating"></tbody>
+                </table>
+              </div>
+              <div class="card-footer text-secondary small" id="an-rating-hint"></div>
+            </div>
+            <div class="row row-cards">
+              <div class="col-xl-8">
                 <div class="card h-100">
                   <div class="card-header">
                     <h3 class="card-title">Количество против качества</h3>
-                    <div class="card-actions text-secondary">справа внизу — «работа на количество»</div>
+                    <div class="card-actions text-secondary">красная зона — много закрыто, но плохо</div>
                   </div>
                   <div class="card-body"><div id="an-scatter" class="chart"></div></div>
+                </div>
+              </div>
+              <div class="col-xl-4">
+                <div class="card h-100">
+                  <div class="card-header"><h3 class="card-title">Требуют внимания</h3></div>
+                  <div class="list-group list-group-flush" id="an-attention"></div>
                 </div>
               </div>
             </div>
