@@ -3,6 +3,7 @@
 import { api, problemText } from './api.js';
 import { openEditor as openShared } from './editor.js';
 import { $, el, row, badge, button, actions, fmt, toast, field, input, select, checkbox, emptyRow } from './dom.js';
+import { can } from './session.js';
 
 const TYPE_LABEL = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
 const NUMERIC_OPS = ['greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual'];
@@ -50,7 +51,7 @@ function renderFields(owner, tbody) {
     return row([
       el('code', f.key), f.label, TYPE_LABEL[f.type] || f.type, optionsCell,
       f.usedByRules ? badge(String(f.usedByRules), 'ok') : '—',
-      actions(button('Изменить', () => editField(f), 'btn btn-sm', 'pencil'), button('Удалить', () => removeField(f), 'btn btn-sm btn-outline-danger', 'trash')),
+      can('Admin') ? actions(button('Изменить', () => editField(f), 'btn btn-sm', 'pencil'), button('Удалить', () => removeField(f), 'btn btn-sm btn-outline-danger', 'trash')) : '',
     ]);
   }));
 }
@@ -72,7 +73,7 @@ function renderRules() {
     return row([
       toggle(r.isEnabled, (on) => saveRule(r.id, { ...ruleInput(r), isEnabled: on })),
       r.priority, r.name, condition, r.isStrict ? badge('строгое', 'warn') : '—',
-      actions(button('Изменить', () => editRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeRule(r), 'btn btn-sm btn-outline-danger', 'trash')),
+      can('Admin') ? actions(button('Изменить', () => editRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeRule(r), 'btn btn-sm btn-outline-danger', 'trash')) : '',
     ], r.isEnabled ? '' : 'inactive');
   }));
 }
@@ -88,7 +89,7 @@ function renderWeightRules() {
     return row([
       toggle(r.isEnabled, (on) => saveWeightRule(r.id, { ...weightInput(r), isEnabled: on })),
       r.priority, condition, el('strong', fmt(r.weight)),
-      actions(button('Изменить', () => editWeightRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeWeightRule(r), 'btn btn-sm btn-outline-danger', 'trash')),
+      can('Admin') ? actions(button('Изменить', () => editWeightRule(r), 'btn btn-sm', 'pencil'), button('Удалить', () => removeWeightRule(r), 'btn btn-sm btn-outline-danger', 'trash')) : '',
     ], r.isEnabled ? '' : 'inactive');
   }));
 }

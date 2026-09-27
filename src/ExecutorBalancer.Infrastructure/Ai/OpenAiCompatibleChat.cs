@@ -23,6 +23,12 @@ public sealed class AiOptions
     /// <summary>Ключ API — только из окружения (AI_API_KEY). Для своей модели без ключа — пусто.</summary>
     public string ApiKey { get; set; } = "";
 
+    /// <summary>
+    /// Проект или каталог у провайдера — уходит заголовком OpenAI-Project (так OpenAI-совместимые клиенты передают
+    /// параметр project). Нужен, например, Yandex AI Studio: номер каталога. Пусто — заголовка нет.
+    /// </summary>
+    public string Project { get; set; } = "";
+
     public int TimeoutSeconds { get; set; } = 90;
 
     public int MaxTokens { get; set; } = 1500;
@@ -63,6 +69,11 @@ public sealed class OpenAiCompatibleChat(IHttpClientFactory http, IOptions<AiOpt
         if (!string.IsNullOrWhiteSpace(settings.ApiKey))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiKey);
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.Project))
+        {
+            request.Headers.TryAddWithoutValidation("OpenAI-Project", settings.Project.Trim());
         }
 
         HttpResponseMessage response;

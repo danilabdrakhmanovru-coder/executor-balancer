@@ -5,6 +5,8 @@ using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Application.Executors;
 using ExecutorBalancer.Application.Insights;
+using ExecutorBalancer.Application.Users;
+using ExecutorBalancer.Domain;
 
 namespace ExecutorBalancer.Api.Endpoints;
 
@@ -30,26 +32,26 @@ public static class AdminEndpoints
         group.MapGet("/config", (DepartmentScope d, ConfigurationService config, CancellationToken ct) => config.GetAsync(d.Id, ct));
 
         group.MapPost("/fields", async (DepartmentScope d, FieldInput input, ConfigurationService config, CancellationToken ct) =>
-            Results.Ok(await config.CreateFieldAsync(d.Id, input, ct)));
+            Results.Ok(await config.CreateFieldAsync(d.Id, input, ct))).RequireAuthorization(Policies.Admin);
         group.MapPut("/fields/{id:int}", async (DepartmentScope d, int id, FieldInput input, ConfigurationService config, CancellationToken ct) =>
-            await config.UpdateFieldAsync(d.Id, id, input, ct) is { } field ? Results.Ok(field) : NotFound());
+            await config.UpdateFieldAsync(d.Id, id, input, ct) is { } field ? Results.Ok(field) : NotFound()).RequireAuthorization(Policies.Admin);
         group.MapDelete("/fields/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
-            await config.DeleteFieldAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
+            await config.DeleteFieldAsync(d.Id, id, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Admin);
 
         group.MapPost("/rules", async (DepartmentScope d, RuleInput input, ConfigurationService config, CancellationToken ct) =>
-            Results.Ok(await config.CreateRuleAsync(d.Id, input, ct)));
+            Results.Ok(await config.CreateRuleAsync(d.Id, input, ct))).RequireAuthorization(Policies.Admin);
         group.MapPut("/rules/{id:int}", async (DepartmentScope d, int id, RuleInput input, ConfigurationService config, CancellationToken ct) =>
-            await config.UpdateRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
+            await config.UpdateRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound()).RequireAuthorization(Policies.Admin);
         group.MapDelete("/rules/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
-            await config.DeleteRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
+            await config.DeleteRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Admin);
 
         group.MapPost("/weight-rules", async (DepartmentScope d, WeightRuleInput input, ConfigurationService config, CancellationToken ct) =>
-            Results.Ok(await config.CreateWeightRuleAsync(d.Id, input, ct)));
+            Results.Ok(await config.CreateWeightRuleAsync(d.Id, input, ct))).RequireAuthorization(Policies.Admin);
         group.MapPut("/weight-rules/{id:int}",
             async (DepartmentScope d, int id, WeightRuleInput input, ConfigurationService config, CancellationToken ct) =>
-                await config.UpdateWeightRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound());
+                await config.UpdateWeightRuleAsync(d.Id, id, input, ct) is { } rule ? Results.Ok(rule) : NotFound()).RequireAuthorization(Policies.Admin);
         group.MapDelete("/weight-rules/{id:int}", async (DepartmentScope d, int id, ConfigurationService config, CancellationToken ct) =>
-            await config.DeleteWeightRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound());
+            await config.DeleteWeightRuleAsync(d.Id, id, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Admin);
 
         // ИИ-разбор заявок: подсказка руководителю, в распределении не участвует
         group.MapGet("/ai/status", (DepartmentScope d, AiAnalyst ai) =>
@@ -69,15 +71,16 @@ public static class AdminEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "ИИ-разбор недоступен",
                     detail: ex.Message);
             }
-        });
+        }).RequireAuthorization(Policies.Manager);
 
         group.MapGet("/presets", (DepartmentScope d, ConfigurationService config, CancellationToken ct) => config.GetPresetsAsync(d.Id, ct));
         group.MapPost("/presets/{id}/apply", async (DepartmentScope d, string id, ConfigurationService config, CancellationToken ct) =>
         {
             await config.ApplyPresetAsync(d.Id, id, ct);
             return Results.NoContent();
-        });
+        }).RequireAuthorization(Policies.Admin);
 
+        // проверка заявки ничего не меняет — доступна и наблюдателю: «почему заявка ушла ему» видят все
         group.MapPost("/preview", Preview);
         group.MapPost("/preview/executors/{id:long}", CheckExecutor);
 
@@ -86,10 +89,10 @@ public static class AdminEndpoints
             await config.GetMotivationAsync(d.Id, ct) is { } m ? Results.Ok(m) : NotFound());
         group.MapPut("/motivation", async (DepartmentScope d, MotivationInput input, ConfigurationService config,
                 CancellationToken ct) =>
-            await config.UpdateMotivationAsync(d.Id, input, ct) is { } m ? Results.Ok(m) : NotFound());
+            await config.UpdateMotivationAsync(d.Id, input, ct) is { } m ? Results.Ok(m) : NotFound()).RequireAuthorization(Policies.Admin);
         // загрузка сотрудников из файла: шаблон отдела, проверка без записи, запись
         group.MapGet("/executors/template.csv", async (DepartmentScope d, ExecutorImportService import, CancellationToken ct) =>
-            Results.File(await import.TemplateAsync(d.Id, ct), "text/csv; charset=utf-8", $"sotrudniki-otdel-{d.Id}.csv"));
+            Results.File(await import.TemplateAsync(d.Id, ct), "text/csv; charset=utf-8", $"sotrudniki-otdel-{d.Id}.csv")).RequireAuthorization(Policies.Manager);
         group.MapPost("/executors/import", async (DepartmentScope d, bool? apply, HttpRequest request,
             ExecutorImportService import, CancellationToken ct) =>
         {
@@ -101,22 +104,39 @@ public static class AdminEndpoints
             }
 
             return Results.Ok(apply == true ? await import.ApplyAsync(d.Id, file, ct) : await import.PreviewAsync(d.Id, file, ct));
-        });
+        }).RequireAuthorization(Policies.Manager);
         group.MapPut("/executors/{id:long}/extra", async (DepartmentScope d, long id, ExtraModeInput input,
                 ConfigurationService config, CancellationToken ct) =>
-            await config.SetExtraModeAsync(d.Id, id, input, ct) ? Results.NoContent() : NotFound());
+            await config.SetExtraModeAsync(d.Id, id, input, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Manager);
 
         // отделы: список общий, изменения — только пустых отделов (см. DepartmentService)
-        group.MapGet("/departments", (DepartmentService departments, CancellationToken ct) => departments.ListAsync(ct));
+        // список — только доступные пользователю отделы
+        group.MapGet("/departments", async (HttpContext http, DepartmentService departments, CancellationToken ct) =>
+        {
+            var access = http.User.Access();
+            return (await departments.ListAsync(ct)).Where(d => access.CanSee(d.Id)).ToList();
+        });
         group.MapPost("/departments", async (DepartmentInput input, DepartmentService departments, CancellationToken ct) =>
-            Results.Ok(await departments.CreateAsync(input, ct)));
+            Results.Ok(await departments.CreateAsync(input, ct))).RequireAuthorization(Policies.Admin);
         group.MapPut("/departments/{id:int}",
             async (int id, DepartmentInput input, DepartmentService departments, CancellationToken ct) =>
-                await departments.RenameAsync(id, input, ct) ? Results.NoContent() : NotFound());
+                await departments.RenameAsync(id, input, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Admin);
         group.MapDelete("/departments/{id:int}", async (int id, DepartmentService departments, CancellationToken ct) =>
-            await departments.DeleteAsync(id, ct) ? Results.NoContent() : NotFound());
-        group.MapGet("/audit", (DepartmentScope d, long? before, int? limit, ConfigurationService config, CancellationToken ct) =>
-            config.GetAuditAsync(d.Id, before, limit ?? 100, ct));
+            await departments.DeleteAsync(id, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Admin);
+        // журнал — руководителю и администратору; входы и пользователи (адреса, логины) — только администратору
+        group.MapGet("/audit", (DepartmentScope d, long? before, int? limit, HttpContext http, ConfigurationService config,
+                CancellationToken ct) =>
+            config.GetAuditAsync(d.Id, before, limit ?? 100, ct, security: http.User.Access().Role == UserRole.Admin))
+            .RequireAuthorization(Policies.Manager);
+
+        // пользователи и роли — только администратор
+        group.MapGet("/users", (UserService users, CancellationToken ct) => users.ListAsync(ct)).RequireAuthorization(Policies.Admin);
+        group.MapPost("/users", async (UserInput input, UserService users, CancellationToken ct) =>
+            Results.Ok(await users.CreateAsync(input, ct))).RequireAuthorization(Policies.Admin);
+        group.MapPut("/users/{id:int}", async (int id, UserInput input, UserService users, CancellationToken ct) =>
+            await users.UpdateAsync(id, input, ct) is { } user ? Results.Ok(user) : NotFound()).RequireAuthorization(Policies.Admin);
+        group.MapDelete("/users/{id:int}", async (int id, UserService users, CancellationToken ct) =>
+            await users.DeleteAsync(id, ct) ? Results.NoContent() : NotFound()).RequireAuthorization(Policies.Admin);
         return app;
     }
 

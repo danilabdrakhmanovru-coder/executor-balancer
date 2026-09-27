@@ -2,6 +2,7 @@
 // Ответ модели — только текст: выводится через textContent, как и всё остальное.
 import { api, problemText } from './api.js';
 import { $, el, row, badge, fmt, emptyRow, tile, toast } from './dom.js';
+import { can } from './session.js';
 
 let fieldKey = null;
 let running = false;
@@ -114,7 +115,9 @@ function renderStatus(status) {
   const runButton = $('ai-run');
   runButton.disabled = running || !status.isConfigured;
   $('ai-status').textContent = status.isConfigured
-    ? (status.last ? '' : `Подключена модель ${status.model}. Нажмите «Разобрать с ИИ» — разбор займёт до минуты.`)
+    ? (status.last ? '' : can('Manager')
+      ? `Подключена модель ${status.model}. Нажмите «Разобрать с ИИ» — разбор займёт до минуты.`
+      : `Подключена модель ${status.model}. Запустить разбор может руководитель или администратор — результат появится здесь.`)
     : 'ИИ не подключён. Чтобы включить, задайте в .env адрес модели AI_BASE_URL, её имя AI_MODEL и при необходимости ключ '
       + 'AI_API_KEY (подходит любая модель с OpenAI-совместимым API, в том числе своя в контуре компании). '
       + 'Цифры ниже считаются и без ИИ.';

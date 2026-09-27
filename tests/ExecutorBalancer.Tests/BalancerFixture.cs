@@ -36,6 +36,12 @@ internal sealed class BalancerFixture : IAsyncDisposable
         return await action(scope.ServiceProvider.GetRequiredService<ExecutorBalancer.Application.Insights.AiAnalyst>());
     }
 
+    public async Task<T> Users<T>(Func<ExecutorBalancer.Application.Users.UserService, Task<T>> action)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await action(scope.ServiceProvider.GetRequiredService<ExecutorBalancer.Application.Users.UserService>());
+    }
+
     public async Task<ExecutorBalancer.Application.Insights.DemandReport> Demand(int department = D)
     {
         await using var scope = _services.CreateAsyncScope();

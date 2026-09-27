@@ -47,7 +47,7 @@ public static class DemoEndpoints
     {
         var group = app.MapGroup("/api/admin/demo")
             .WithTags("Демонстрация")
-            .RequireAuthorization()
+            .RequireAuthorization(Policies.Admin)
             .AddEndpointFilter<CsrfHeaderFilter>()
             .AddEndpointFilter(async (context, next) =>
                 context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled

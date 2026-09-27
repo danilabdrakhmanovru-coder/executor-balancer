@@ -5,6 +5,7 @@ import { $, el, row, badge, button, actions, fmt, toast, field, input, select, e
 import { openEditor } from './editor.js';
 import { sphereBuilder } from './sphere.js';
 import { allDepartments, currentDepartment, loadDepartments, selectDepartment } from './department.js';
+import { can } from './session.js';
 
 const MAIN_ID = 1;
 let demoEnabled = false;
@@ -36,9 +37,9 @@ export async function refreshDepartments() {
     if (d.id === current?.id) name.append(' ', badge('открыт', 'ok'));
     const buttons = [];
     if (d.id !== current?.id) buttons.push(button('Открыть', () => selectDepartment(d.id), 'btn btn-sm btn-primary', 'arrow-right'));
-    buttons.push(button('Переименовать', () => rename(d), 'btn btn-sm', 'pencil'));
+    if (can('Admin')) buttons.push(button('Переименовать', () => rename(d), 'btn btn-sm', 'pencil'));
     // основной отдел принимает заявки по общему адресу, а с сотрудниками — хранит историю: их не удалить
-    if (d.id !== MAIN_ID && d.executors === 0 && d.openOrders === 0) {
+    if (can('Admin') && d.id !== MAIN_ID && d.executors === 0 && d.openOrders === 0) {
       buttons.push(button('Удалить', () => remove(d), 'btn btn-sm btn-outline-danger', 'trash'));
     }
     return row([

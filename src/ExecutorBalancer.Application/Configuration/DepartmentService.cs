@@ -23,11 +23,11 @@ public sealed partial class DepartmentService(
     ILoadStore loadStore,
     ExecutorDirectory directory,
     TimeProvider clock,
-    ILogger<DepartmentService> logger)
+    ILogger<DepartmentService> logger,
+    Users.ICurrentActor actor)
 {
     public const int MaxDepartments = 20;
     public const int MaxNameLength = 120;
-    private const string Actor = "admin";
 
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web)
     {
@@ -239,7 +239,7 @@ public sealed partial class DepartmentService(
         // общее событие (DepartmentId = null): видно в журнале любого отдела
         db.AuditEntries.Add(new AuditEntry
         {
-            Actor = Actor,
+            Actor = actor.Name,
             Action = action,
             Entity = "department",
             EntityId = id.ToString(System.Globalization.CultureInfo.InvariantCulture),

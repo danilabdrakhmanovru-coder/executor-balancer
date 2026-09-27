@@ -22,7 +22,8 @@ public sealed class ConfigurationService(
     ExecutorDirectory directory,
     IOptions<BalancerOptions> options,
     TimeProvider clock,
-    ILogger<ConfigurationService> logger)
+    ILogger<ConfigurationService> logger,
+    Users.ICurrentActor actor)
 {
     public const int MaxFieldsPerOwner = FieldCatalog.MaxAttributes;
     public const int MaxRules = 200;
@@ -35,7 +36,6 @@ public sealed class ConfigurationService(
     public const decimal MinWeight = 0.1m;
     public const decimal MaxWeight = 1000m;
     private const int MaxValueJsonLength = 8000;
-    private const string Actor = "admin";
 
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web)
     {
@@ -69,10 +69,16 @@ public sealed class ConfigurationService(
 
     /// <summary>Журнал: изменения конфигурации и входы администратора, новые сверху.</summary>
     /// <remarks>Изменения этого отдела и общие события (входы, создание и удаление отделов).</remarks>
+    /// <param name="security">Входы и пользователи (адреса, логины) — только для администратора.</param>
     public async Task<IReadOnlyList<AuditView>> GetAuditAsync(int departmentId, long? beforeId, int limit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool security = true)
     {
         var query = db.AuditEntries.AsNoTracking().Where(a => a.DepartmentId == departmentId || a.DepartmentId == null);
+        if (!security)
+        {
+            query = query.Where(a => a.Entity != "session" && a.Entity != "user");
+        }
+
         if (beforeId is { } before)
         {
             query = query.Where(a => a.Id < before);
@@ -243,7 +249,7 @@ public sealed class ConfigurationService(
             db.AuditEntries.Add(new AuditEntry
             {
                 DepartmentId = departmentId,
-                Actor = Actor,
+                Actor = actor.Name,
                 Action = "preset_applied",
                 Entity = "preset",
                 EntityId = preset.Id,
@@ -622,7 +628,7 @@ public sealed class ConfigurationService(
             db.AuditEntries.Add(new AuditEntry
             {
                 DepartmentId = departmentId,
-                Actor = Actor,
+                Actor = actor.Name,
                 Action = action,
                 Entity = entity,
                 EntityId = entityId().ToString(CultureInfo.InvariantCulture),

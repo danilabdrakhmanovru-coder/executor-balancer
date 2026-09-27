@@ -20,6 +20,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     public DbSet<OrderStatusChange> OrderStatusChanges => Set<OrderStatusChange>();
     public DbSet<ExecutorHourStat> ExecutorHourStats => Set<ExecutorHourStat>();
     public DbSet<EligibilityHourStat> EligibilityHourStats => Set<EligibilityHourStat>();
+    public DbSet<User> Users => Set<User>();
 
     public bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
@@ -40,6 +41,17 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var model = modelBuilder;
+        model.Entity<User>(e =>
+        {
+            e.ToTable("users");
+            e.Property(x => x.Login).HasMaxLength(32);
+            e.Property(x => x.DisplayName).HasMaxLength(120);
+            e.Property(x => x.PasswordHash).HasMaxLength(200);
+            e.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.SecurityStamp).HasMaxLength(64);
+            e.HasIndex(x => x.Login).IsUnique();
+        });
+
         model.Entity<Department>(e =>
         {
             e.ToTable("departments");

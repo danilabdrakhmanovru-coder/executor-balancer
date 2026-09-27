@@ -53,6 +53,9 @@ public static class DependencyInjection
                 "Ai:BaseUrl — адрес http(s)")
             .Validate(o => o.TimeoutSeconds is >= 5 and <= 600 && o.MaxTokens is >= 100 and <= 16000,
                 "Ai:TimeoutSeconds — от 5 до 600, Ai:MaxTokens — от 100 до 16000")
+            // уходит в заголовок запроса — только безопасные символы
+            .Validate(o => o.Project.Length <= 100 && o.Project.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.'),
+                "Ai:Project — латинские буквы, цифры, «-», «_», «.»")
             .ValidateOnStart();
         services.AddHttpClient(Ai.AiOptions.HttpClientName, (sp, client) =>
         {

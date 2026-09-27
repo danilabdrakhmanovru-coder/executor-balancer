@@ -56,9 +56,10 @@ code { font-size: 12px; }
 .app-tabs .nav-link:hover { color: var(--tblr-body-color); }
 .app-tabs .nav-link.active { color: var(--tblr-primary); border-bottom-color: var(--tblr-primary); }
 /* пульт имитации — справа и приглушённо: это не часть продукта, а подмена внешней системы */
-.app-tabs .tab-demo { margin-left: auto; font-style: italic; }
-.settings-nav { flex-wrap: wrap; margin-bottom: 16px; }
-.settings-nav .btn { display: inline-flex; align-items: center; gap: 6px; }
+.app-tabs .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-tabs .tab-demo { font-style: italic; }
+.subnav { flex-wrap: wrap; margin-bottom: 16px; }
+.subnav .btn { display: inline-flex; align-items: center; gap: 6px; }
 
 /* переключатель отдела */
 .dept-switch { display: flex; align-items: center; gap: 8px; margin-left: 24px; min-width: 0; }
@@ -350,3 +351,14 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .ai-finding { padding: 10px 12px; border: 1px solid var(--tblr-border-color); border-radius: 8px; }
 .ai-finding-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
 .ai-recommendations { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+/* роли: кнопки, которые вернули бы «нет прав», не показываются (права всё равно проверяет сервер) */
+body.role-viewer .need-manager, body:not(.role-admin) .need-admin { display: none !important; }
+.user-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.15; }
+.user-chip .user-name { display: block; color: var(--tblr-body-color); font-weight: 600; }
+.user-chip .user-role { display: block; font-size: 11px; }
+@media (max-width: 767.98px) { .user-chip > span { display: none; } }
+.check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 12px; }
+.input-row { display: flex; gap: 8px; align-items: center; }
+.roles-table td:not(:first-child), .roles-table th:not(:first-child) { text-align: center; }
+.read-only-note { color: var(--muted); font-size: 13px; }

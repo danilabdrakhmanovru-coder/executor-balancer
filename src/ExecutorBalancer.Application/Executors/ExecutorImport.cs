@@ -24,7 +24,7 @@ public sealed record ImportPreview(IReadOnlyList<ImportRow> Rows, int Valid, int
 /// Сотрудники обычно приходят из АИС; файл — для начальной загрузки и массовых изменений.
 /// </summary>
 public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirectory directory, OrderBalancer balancer,
-    TimeProvider clock)
+    TimeProvider clock, Users.ICurrentActor actor)
 {
     public const int MaxBytes = 256 * 1024; // столько же, сколько сервер принимает в одном запросе
     public const int MaxRows = 2000;
@@ -56,7 +56,7 @@ public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirecto
         var audit = new AuditEntry
         {
             DepartmentId = departmentId,
-            Actor = "admin",
+            Actor = actor.Name,
             Action = "executors_imported",
             Entity = "executor",
             EntityId = incoming.Count.ToString(CultureInfo.InvariantCulture),
