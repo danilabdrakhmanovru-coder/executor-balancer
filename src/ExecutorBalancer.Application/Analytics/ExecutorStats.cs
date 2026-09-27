@@ -65,6 +65,10 @@ public static class ExecutorStats
 
     public static DateTimeOffset HourStart(long bucket) => DateTimeOffset.FromUnixTimeSeconds(bucket * 3600);
 
+    /// <summary>Пятиминутка внутри часа (0–11) — для групп «кто мог взять».</summary>
+    public static int SlotOf(DateTimeOffset moment) =>
+        (int)(((moment.ToUnixTimeSeconds() % 3600) + 3600) % 3600 / EligibilityHourStat.SlotSeconds);
+
     public static Task RecordAsync(IBalancerDbContext db, DateTimeOffset moment, int departmentId,
         IEnumerable<StatDelta> deltas, CancellationToken cancellationToken)
     {
@@ -118,13 +122,13 @@ public static class ExecutorStats
 
         return db.Database.ExecuteSqlRawAsync(
             """
-            INSERT INTO eligibility_hour_stats ("DepartmentId", "BucketHour", "SetKey", "Count", "Weight")
-            VALUES ({3}, {0}, {1}, 1, {2})
-            ON CONFLICT ("DepartmentId", "BucketHour", "SetKey") DO UPDATE SET
+            INSERT INTO eligibility_hour_stats ("DepartmentId", "BucketHour", "Slot", "SetKey", "Count", "Weight")
+            VALUES ({3}, {0}, {4}, {1}, 1, {2})
+            ON CONFLICT ("DepartmentId", "BucketHour", "Slot", "SetKey") DO UPDATE SET
                 "Count" = eligibility_hour_stats."Count" + 1,
                 "Weight" = eligibility_hour_stats."Weight" + excluded."Weight"
             """,
-            [HourOf(moment), key, weight, departmentId],
+            [HourOf(moment), key, weight, departmentId, SlotOf(moment)],
             cancellationToken);
     }
 

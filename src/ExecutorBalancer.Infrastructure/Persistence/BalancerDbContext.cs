@@ -194,7 +194,7 @@ public sealed class BalancerDbContext(DbContextOptions<BalancerDbContext> option
         model.Entity<EligibilityHourStat>(e =>
         {
             e.ToTable("eligibility_hour_stats");
-            e.HasKey(x => new { x.DepartmentId, x.BucketHour, x.SetKey });
+            e.HasKey(x => new { x.DepartmentId, x.BucketHour, x.Slot, x.SetKey });
             e.Property(x => x.SetKey).HasMaxLength(EligibilityHourStat.MaxSetKeyLength);
             e.Property(x => x.Weight).HasPrecision(18, 3);
         });

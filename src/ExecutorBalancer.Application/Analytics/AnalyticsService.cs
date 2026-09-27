@@ -76,8 +76,10 @@ public sealed record LivePoint(DateTimeOffset Minute, int Assigned);
 /// <summary>
 /// Отчёты по сводным таблицам executor_hour_stats и eligibility_hour_stats.
 /// Заявки от родителя и вторичные обязаны идти «своему» исполнителю — в эталоне (<see cref="FairShare"/>)
-/// они неизменная часть нагрузки, а выравнивается свободный выбор. Эталон строится отдельно для каждого интервала,
-/// чтобы учитывать, кто в это время работал: ушедший на обед исполнитель не должен «догонять» утро.
+/// они неизменная часть нагрузки, а выравнивается свободный выбор. Эталон строится по часам, как и сам выбор
+/// (главный критерий — вес, полученный за текущий час), а внутри часа — по пятиминуткам по порядку: учитывается,
+/// кто в это время работал и кто уже упёрся в суточный лимит. Эталон не требует от выбора предвидения — например,
+/// заранее «приберечь» заявки для коллеги, который через десять минут останется единственным подходящим.
 /// </summary>
 public sealed class AnalyticsService(
     IBalancerDbContext db,
@@ -143,23 +145,14 @@ public sealed class AnalyticsService(
 
         var snapshot = await directory.GetAsync(departmentId, cancellationToken);
         var qualificationAt = await QualificationHistoryAsync(snapshot, rows, pools, cancellationToken);
-        var capped = LimitReached(rows, snapshot, offset, size);
+        var capped = LimitReached(rows, snapshot, offset);
         var fair = new Dictionary<long, decimal>();
-        var poolsByWindow = pools.GroupBy(p => FloorDiv(p.BucketHour + offset, size)).ToDictionary(g => g.Key, g => g.ToList());
-        foreach (var window in rows.GroupBy(r => FloorDiv(r.BucketHour + offset, size)))
+        var poolsByHour = pools.GroupBy(p => p.BucketHour).ToDictionary(g => g.Key, g => g.ToList());
+        foreach (var hour in rows.GroupBy(r => r.BucketHour))
         {
-            // назначения без выбора — неизменная часть нагрузки, эталон выравнивает остальное с их учётом
-            var forced = window.GroupBy(r => r.ExecutorId)
-                .ToDictionary(g => g.Key, g => g.Sum(r => r.AssignedWeight - r.FreeWeight));
-            var caps = window.GroupBy(r => r.ExecutorId)
-                .Where(g => capped.Contains((g.Key, window.Key)))
-                .ToDictionary(g => g.Key, g => g.Sum(r => r.AssignedWeight));
-            var allocation = FairShare.Allocate(
-                (poolsByWindow.GetValueOrDefault(window.Key) ?? [])
-                    .GroupBy(p => p.SetKey)
-                    .Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight))),
-                // квалификация — та, что действовала в этом интервале: смена днём не искажает утренние часы
-                qualificationAt(ExecutorStats.HourStart(window.Key * size - offset).AddHours(size / 2d)), forced, caps);
+            var allocation = FairHour(hour.ToList(), poolsByHour.GetValueOrDefault(hour.Key) ?? [],
+                // квалификация — та, что действовала в этот час: смена днём не искажает утренние часы
+                qualificationAt(ExecutorStats.HourStart(hour.Key).AddMinutes(30)), capped);
             foreach (var (id, weight) in allocation)
             {
                 fair[id] = fair.GetValueOrDefault(id) + weight;
@@ -247,11 +240,50 @@ public sealed class AnalyticsService(
     }
 
     /// <summary>
-    /// Интервалы, в которых исполнитель набрал суточный лимит: там он больше получить не мог.
+    /// Эталон за один час. Пятиминутки идут по порядку, каждая «доливается» поверх нагрузки, набранной в этот час
+    /// к её началу, — так же, как выбирает сам алгоритм. Назначения без выбора приходят в течение часа: в каждую
+    /// пятиминутку попадает их доля, пропорциональная её потоку. Записи без пятиминуток (до их появления) — один
+    /// отрезок на весь час, как раньше.
+    /// </summary>
+    private static Dictionary<long, decimal> FairHour(List<ExecutorHourStat> rows, List<EligibilityHourStat> pools,
+        IReadOnlyDictionary<long, decimal> qualification, HashSet<(long ExecutorId, long Hour)> capped)
+    {
+        // назначения без выбора — неизменная часть нагрузки, эталон выравнивает остальное с их учётом
+        var forced = rows.GroupBy(r => r.ExecutorId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.AssignedWeight - r.FreeWeight));
+        var caps = rows.GroupBy(r => r.ExecutorId)
+            .Where(g => capped.Contains((g.Key, g.First().BucketHour)))
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.AssignedWeight));
+        var slots = pools.GroupBy(p => p.Slot).OrderBy(g => g.Key).Select(g => g.ToList()).ToList();
+        var total = slots.Sum(slot => slot.Sum(p => p.Weight));
+        if (total <= 0)
+        {
+            return forced;
+        }
+
+        var load = new Dictionary<long, decimal>();
+        foreach (var slot in slots)
+        {
+            var share = slot.Sum(p => p.Weight) / total;
+            foreach (var (id, weight) in forced)
+            {
+                load[id] = load.GetValueOrDefault(id) + weight * share;
+            }
+
+            load = FairShare.Allocate(
+                slot.GroupBy(p => p.SetKey).Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight))),
+                qualification, load, caps);
+        }
+
+        return load;
+    }
+
+    /// <summary>
+    /// Часы, в которых исполнитель набрал суточный лимит: там он больше получить не мог.
     /// Сутки — по местному времени, как у счётчика лимита.
     /// </summary>
-    private static HashSet<(long ExecutorId, long Window)> LimitReached(List<ExecutorHourStat> rows,
-        BalancerSnapshot snapshot, long offset, int size)
+    private static HashSet<(long ExecutorId, long Hour)> LimitReached(List<ExecutorHourStat> rows,
+        BalancerSnapshot snapshot, long offset)
     {
         var result = new HashSet<(long, long)>();
         foreach (var day in rows.GroupBy(r => (r.ExecutorId, Day: FloorDiv(r.BucketHour + offset, 24))))
@@ -267,7 +299,7 @@ public sealed class AnalyticsService(
                 total += row.AssignedCount - row.SecondaryCount; // как суточный счётчик: без возвратов с доработки
                 if (total >= limit)
                 {
-                    result.Add((row.ExecutorId, FloorDiv(row.BucketHour + offset, size)));
+                    result.Add((row.ExecutorId, row.BucketHour));
                 }
             }
         }
