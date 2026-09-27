@@ -141,11 +141,15 @@ function hover(svg, attrs, onMove) {
  * Последний столбец — текущий интервал — выделен цветом, остальные спокойнее.
  */
 export function columns(container, points, { height = 170, empty: message = 'Нет данных', unit = '' } = {}) {
-  if (!points.length || points.every((p) => !p.value)) { empty(container, message); return; }
+  if (!points.length) { empty(container, message); return; }
   const { svg, width } = frame(container, height);
   const left = 40, right = 8, top = 16, bottom = 24;
   const plotW = width - left - right, plotH = height - top - bottom;
-  const axis = scale(Math.max(...points.map((p) => p.value)));
+  // одни нули: оси и подписи времени остаются (график того же размера, что и с данными), по центру — пояснение;
+  // шкала 0–4 — целые деления, а не 0 / 0,5 / 1
+  const zero = points.every((p) => !p.value);
+  const axis = scale(zero ? 4 : Math.max(...points.map((p) => p.value)));
+  if (zero) text(svg, left + plotW / 2, top + plotH * 0.375 + 4, message, 'axis-strong');
   const { max } = axis;
   yGrid(svg, axis, left, top, plotW, plotH, (v) => compact.format(v));
   const step = plotW / points.length;

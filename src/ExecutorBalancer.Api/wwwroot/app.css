@@ -117,6 +117,8 @@ tr.fresh { animation: flash 1.2s ease-out; }
 }
 .chart { min-height: 220px; color: var(--muted); }
 .chart-small { min-height: 160px; }
+/* страница всегда длиннее окна: прокрутка до низа есть, даже когда в отделе ещё нет данных */
+#app .page-wrapper { min-height: 100vh; }
 .chart.is-empty { min-height: 0; }
 .chart.is-empty .chart-empty { margin: 4px 0; }
 .chart-empty { color: var(--muted); font-size: 13px; margin: 24px 0; text-align: center; }
