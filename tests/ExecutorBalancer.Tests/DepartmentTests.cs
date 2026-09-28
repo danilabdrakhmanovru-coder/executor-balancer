@@ -1,6 +1,7 @@
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
+using ExecutorBalancer.Application.Users;
 using ExecutorBalancer.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -177,6 +178,12 @@ public class DepartmentTests : IAsyncLifetime
                 BalancerFixture.Attributes(BalancerFixture.DefaultOrder())), CancellationToken.None);
         });
         Assert.NotNull((await _f.Query(db => db.Orders.AsNoTracking().SingleAsync(o => o.Id == 500))).ExecutorId);
+
+        // пользователь «все отделы» песочницу не видит, её гость и администратор — видят
+        Assert.False(new AccessScope("viewer", UserRole.Viewer, null).SeesGuestSandboxes);
+        Assert.True(new AccessScope("guest", UserRole.Manager, [sandbox.Id]).SeesGuestSandboxes);
+        Assert.False(await _f.Departments(d => d.ExistsAsync(sandbox.Id, CancellationToken.None, withGuests: false)));
+        Assert.True(await _f.Departments(d => d.ExistsAsync(D, CancellationToken.None, withGuests: false)));
 
         // журнал песочницы не попадает в общий: другие гости и отделы её не видят
         var shared = await _f.Config(c => c.GetAuditAsync(D, null, 50, CancellationToken.None));
