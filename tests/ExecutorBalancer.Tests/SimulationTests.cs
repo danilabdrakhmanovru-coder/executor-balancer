@@ -70,6 +70,20 @@ public class SimulationTests
     }
 
     [Fact]
+    public void AddedExecutorsContinueNames()
+    {
+        // добавление к двум имеющимся: номера с 3, имена продолжают список, а не начинаются заново
+        var request = new SeedExecutorsRequest(2, [], null, 3, ["Иванов И.", "Петрова А.", "Сидоров К."], KeepOthers: true,
+            NameOffset: 2);
+
+        var executors = request.Build(Seeded);
+
+        Assert.Null(request.Validate());
+        Assert.Equal([3L, 4L], executors.Select(e => e.Id));
+        Assert.Equal(["Сидоров К.", "Иванов И. 2"], executors.Select(e => e.FullName));
+    }
+
+    [Fact]
     public void HastyExecutorsAreAStableMinority()
     {
         var hasty = Enumerable.Range(1, 1000).Count(id => SimulationService.IsHasty(id, 0.15));

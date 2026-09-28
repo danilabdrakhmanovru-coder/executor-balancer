@@ -59,18 +59,28 @@ function sampleNumber(f) {
 /**
  * Поля формы для параметров одного владельца (Order или Executor).
  * read() возвращает объект «ключ → значение» без незаполненных полей.
+ * required — каждый параметр обязателен (сотрудник): пустой параметр не даст сохранить, в списке нужно
+ * отметить хотя бы одно значение. Сервер проверяет то же самое.
  */
-export function attributeForm(config, owner, values = {}) {
+export function attributeForm(config, owner, values = {}, { required = false } = {}) {
   const fields = config.fields.filter((f) => f.owner === owner);
   const controls = fields.map((f) => [f, control(f, values[f.key])]);
+  const hint = (f) => (!required ? undefined
+    : f.type === 'Array' ? 'Обязательно: отметьте хотя бы одно значение.' : 'Обязательно.');
   return {
-    nodes: controls.map(([f, c]) => field(f.label, c.node)),
+    nodes: controls.map(([f, c]) => field(required ? `${f.label} *` : f.label, c.node, hint(f))),
     empty: fields.length === 0,
     read() {
       const result = {};
+      const missing = [];
       for (const [f, c] of controls) {
         const value = read(f, c);
         if (value !== undefined) result[f.key] = value;
+        else missing.push(f.label);
+      }
+      if (required && missing.length) {
+        throw new Error(`Заполните: ${missing.join(', ')}. У сотрудника должен быть задан каждый параметр, `
+          + 'в списке — хотя бы одно значение: иначе правило на этот параметр его не ограничит.');
       }
       return result;
     },

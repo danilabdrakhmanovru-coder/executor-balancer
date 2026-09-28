@@ -52,7 +52,8 @@ public sealed class StaffService(
     }
 
     /// <summary>Увольнение: открытые заявки — коллегам, сотрудник удаляется. История назначений остаётся.</summary>
-    public async Task<bool> DismissAsync(int departmentId, long executorId, CancellationToken cancellationToken)
+    /// <param name="force">Без проверки состава смены — когда администратор тестового стенда сам задаёт численность отдела.</param>
+    public async Task<bool> DismissAsync(int departmentId, long executorId, CancellationToken cancellationToken, bool force = false)
     {
         var executor = await db.Executors.AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == executorId && e.DepartmentId == departmentId, cancellationToken);
@@ -63,7 +64,11 @@ public sealed class StaffService(
 
         if (executor.IsActive)
         {
-            await EnsureCanLeaveAsync(departmentId, executor, dismissal: true, cancellationToken);
+            if (!force)
+            {
+                await EnsureCanLeaveAsync(departmentId, executor, dismissal: true, cancellationToken);
+            }
+
             // как уход с работы: открытые заявки уходят коллегам
             await balancer.UpsertExecutorAsync(departmentId, Incoming(executor, false), cancellationToken);
         }

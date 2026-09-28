@@ -175,6 +175,11 @@ api.MapPost("/executors/seed", (SeedExecutorsRequest body, AisStore store, AisCo
         commands.UpsertExecutor(executor);
     }
 
+    if (body.KeepOthers)
+    {
+        return Results.Ok(created);
+    }
+
     // прежние исполнители отдела вне нового набора уходят в неактивные
     var ids = created.Select(e => e.Id).ToHashSet();
     foreach (var extra in store.Executors(body.Department ?? AisStore.NoDepartment).Where(e => !ids.Contains(e.Id) && e.IsActive))

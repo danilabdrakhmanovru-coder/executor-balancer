@@ -58,23 +58,27 @@ public sealed partial class FieldCatalog
         return values;
     }
 
-    /// <summary>Сообщение, когда у сотрудника не задано ни одной характеристики.</summary>
-    public const string NoSkillsMessage =
-        "нужна хотя бы одна характеристика (навык) — без них сотрудник подходит к любым заявкам";
-
     /// <summary>
-    /// Есть ли у сотрудника хоть одна характеристика: без них правила его не ограничивают и он берёт любые заявки.
-    /// Если параметров сотрудника в отделе нет вовсе — требовать нечего.
+    /// Параметры сотрудника, которые не заполнены: пустой список, не выбранное значение справочника, пустая строка,
+    /// не указанное число или «да/нет». Сотрудник без параметра не ограничен правилом на него и берёт любые заявки
+    /// этого вида, поэтому при заведении и правке из интерфейса заполнены должны быть все.
     /// </summary>
-    public bool HasExecutorSkills(IReadOnlyDictionary<string, FieldValue> values) =>
-        !_fields.Keys.Any(k => k.Owner == FieldOwner.Executor)
-        || values.Values.Any(v => v.Type switch
-        {
-            FieldType.Array => v.Items.Count > 0,
-            FieldType.Boolean => v.Flag,
-            FieldType.String or FieldType.Enum => v.Text.Length > 0,
-            _ => true,
-        });
+    public IReadOnlyList<string> MissingExecutorFields(IReadOnlyDictionary<string, FieldValue> values) =>
+        _fields.Values
+            .Where(f => f.Owner == FieldOwner.Executor)
+            .OrderBy(f => f.Id)
+            .Where(f => !values.TryGetValue(f.Key, out var v) || v.Type switch
+            {
+                FieldType.Array => v.Items.Count == 0,
+                FieldType.String or FieldType.Enum => v.Text.Length == 0,
+                _ => false,
+            })
+            .Select(f => f.Label)
+            .ToList();
+
+    /// <summary>Текст ошибки для незаполненных параметров сотрудника.</summary>
+    public static string MissingFieldsMessage(IReadOnlyList<string> labels) =>
+        $"не заполнено: {string.Join(", ", labels)} — у сотрудника должен быть задан каждый параметр, в списке — хотя бы одно значение";
 
     public IReadOnlyDictionary<string, FieldValue> ParseStored(FieldOwner owner, string json)
     {
