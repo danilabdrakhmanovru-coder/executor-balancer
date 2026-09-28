@@ -132,6 +132,28 @@ internal sealed class InMemoryLoadStore : ILoadStore
         return Task.CompletedTask;
     }
 
+    public Task ForgetAsync(IReadOnlyCollection<long> executorIds, IReadOnlyCollection<long> orderIds, DateOnly day, long hour,
+        CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            foreach (var id in executorIds)
+            {
+                _openWeight.Remove(id);
+                _openCount.Remove(id);
+                _daily.Remove((day, id));
+                _hourWeight.Remove((hour, id));
+            }
+
+            foreach (var id in orderIds)
+            {
+                _orders.Remove(id);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, long hour,
         CancellationToken cancellationToken)
     {

@@ -12,7 +12,8 @@ namespace ExecutorBalancer.Application.Executors;
 /// <param name="Back">Кто вернулся на работу.</param>
 /// <param name="ExtraCleared">У скольких выключен режим «больше нормы».</param>
 /// <param name="Missing">Скольких не хватает до численности, заведённой администратором.</param>
-public sealed record DemoResetResult(IReadOnlyList<long> Back, int ExtraCleared, int Missing);
+/// <param name="Orders">Сколько заявок отдела удалено вместе с назначениями и статистикой.</param>
+public sealed record DemoResetResult(IReadOnlyList<long> Back, int ExtraCleared, int Missing, int Orders = 0);
 
 /// <summary>
 /// Состав отдела из интерфейса: перерыв, возвращение на работу, увольнение. Уйти может не всякий: на работе должна
@@ -87,9 +88,10 @@ public sealed class StaffService(
     }
 
     /// <summary>
-    /// Демо после гостей: все сотрудники отдела — на работу, режим «больше нормы» выключен. Возвращает, кто вернулся
+    /// Демо после гостей — как с чистого листа: заявки отдела, назначения, история статусов и статистика удаляются,
+    /// нагрузка обнуляется, все сотрудники — на работу, режим «больше нормы» выключен. Возвращает, кто вернулся
     /// на работу и скольких не хватает до численности, заведённой администратором (их заводит пульт через АИС).
-    /// Заявки и статистика не трогаются. null — отдела нет.
+    /// Настройки, правила и журнал остаются. null — отдела нет. Поток в АИС пульт останавливает до вызова.
     /// </summary>
     public async Task<DemoResetResult?> ResetDemoAsync(int departmentId, bool automatic, CancellationToken cancellationToken)
     {
@@ -100,6 +102,23 @@ public sealed class StaffService(
         }
 
         var staff = await db.Executors.AsNoTracking().Where(e => e.DepartmentId == departmentId).ToListAsync(cancellationToken);
+        var orderIds = await db.Orders.AsNoTracking().Where(o => o.DepartmentId == departmentId).Select(o => o.Id)
+            .ToListAsync(cancellationToken);
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            var orders = db.Orders.Where(o => o.DepartmentId == departmentId).Select(o => o.Id);
+            await db.OutboxMessages.Where(m => orders.Contains(m.OrderId)).ExecuteDeleteAsync(cancellationToken);
+            await db.OrderStatusChanges.Where(c => c.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
+            await db.Assignments.Where(a => a.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
+            await db.ExecutorHourStats.Where(x => x.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
+            await db.EligibilityHourStats.Where(x => x.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
+            await db.Orders.Where(o => o.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await loadStore.ForgetAsync(staff.Select(e => e.Id).ToList(), orderIds, balancer.Today(), balancer.CurrentHour(),
+            cancellationToken);
+
         var back = staff.Where(e => !e.IsActive).ToList();
         foreach (var executor in back)
         {
@@ -112,7 +131,7 @@ public sealed class StaffService(
         directory.Invalidate();
 
         var missing = Math.Max(0, (department.DemoStaffCount ?? staff.Count) - staff.Count);
-        if (back.Count > 0 || extra > 0 || missing > 0)
+        if (back.Count > 0 || extra > 0 || missing > 0 || orderIds.Count > 0)
         {
             db.AuditEntries.Add(new AuditEntry
             {
@@ -121,13 +140,13 @@ public sealed class StaffService(
                 Action = "demo_reset",
                 Entity = "department",
                 EntityId = departmentId.ToString(CultureInfo.InvariantCulture),
-                DataJson = JsonSerializer.Serialize(new { after = new { back = back.Count, extra, missing, automatic } }, AuditJson),
+                DataJson = JsonSerializer.Serialize(new { after = new { back = back.Count, extra, missing, orders = orderIds.Count, automatic } }, AuditJson),
                 CreatedAt = clock.GetUtcNow(),
             });
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        return new DemoResetResult(back.Select(e => e.Id).ToList(), extra, missing);
+        return new DemoResetResult(back.Select(e => e.Id).ToList(), extra, missing, orderIds.Count);
     }
 
     /// <summary>

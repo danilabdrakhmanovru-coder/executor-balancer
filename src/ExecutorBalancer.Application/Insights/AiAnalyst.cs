@@ -75,6 +75,9 @@ public sealed class AiGate(TimeProvider clock) : IDisposable
 
     public AiAnalysis? Last(int departmentId) => _last.GetValueOrDefault(departmentId);
 
+    /// <summary>Сброс демо: разбор был по удалённым заявкам — больше его не показываем.</summary>
+    public void Forget(int departmentId) => _last.TryRemove(departmentId, out _);
+
     /// <summary>Через сколько секунд по отделу можно запросить новый разбор (0 — уже можно).</summary>
     public int SecondsUntilNew(int departmentId) =>
         _last.TryGetValue(departmentId, out var last)
@@ -160,7 +163,22 @@ public sealed class AiAnalyst(
 
     public bool IsConfigured => chat.IsConfigured;
 
-    public string Model => chat.Model;
+    /// <summary>Имя модели для показа: gpt://каталог/yandexgpt/latest → «YandexGPT Pro» — без служебного адреса и номера каталога.</summary>
+    public string Model => Title(chat.Model);
+
+    public static string Title(string model)
+    {
+        var name = model.StartsWith("gpt://", StringComparison.OrdinalIgnoreCase)
+            ? model["gpt://".Length..].Split('/') is { Length: >= 2 } parts ? parts[1] : model
+            : model;
+        return name.ToLowerInvariant() switch
+        {
+            "yandexgpt" => "YandexGPT Pro",
+            "yandexgpt-lite" => "YandexGPT Lite",
+            "yandexgpt-32k" => "YandexGPT Pro 32k",
+            _ => name,
+        };
+    }
 
     public AiAnalysis? Last(int departmentId) => gate.Last(departmentId);
 
@@ -185,14 +203,14 @@ public sealed class AiAnalyst(
             var people = await db.Executors.AsNoTracking()
                 .Where(e => e.DepartmentId == departmentId && ids.Contains(e.Id))
                 .ToDictionaryAsync(e => e.Id, e => e.FullName, cancellationToken);
-            return Parse(answer, chat.Model, clock.GetUtcNow(), signals) with { People = people };
+            return Parse(answer, Model, clock.GetUtcNow(), signals) with { People = people };
         });
     }
 
     /// <summary>
     /// Сводка для модели: сначала проверенные сервером проблемы (<see cref="Signals"/>), затем подробности — только
     /// числа и значения справочников, сотрудники под номерами. Считает сервер, модель объясняет: небольшие модели
-    /// хорошо пишут, но ошибаются в сравнении долей, а короткий запрос своя модель без видеокарты обрабатывает быстрее.
+    /// хорошо пишут, но ошибаются в сравнении долей, а короткий запрос модель обрабатывает быстрее и дешевле.
     /// </summary>
     public async Task<(string Context, IReadOnlyList<Signal> Signals)> BuildContextAsync(int departmentId,
         CancellationToken cancellationToken)

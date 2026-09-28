@@ -42,11 +42,12 @@ public sealed class DemoAutoReset(IServiceScopeFactory scopes, IOptions<DemoOpti
                     continue;
                 }
 
-                var (back, added) = await DemoEndpoints.ResetDemoAsync(scope.ServiceProvider, _ => true, automatic: true,
+                var (back, added, orders) = await DemoEndpoints.ResetDemoAsync(scope.ServiceProvider, _ => true, automatic: true,
                     stoppingToken);
                 lastReset = now;
-                logger.LogInformation("Демо возвращено в исходное после гостей: на работу вернулись {Back}, заведено {Added}",
-                    back, added);
+                logger.LogInformation(
+                    "Демо возвращено в исходное после гостей: удалено заявок {Orders}, на работу вернулись {Back}, заведено {Added}",
+                    orders, back, added);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

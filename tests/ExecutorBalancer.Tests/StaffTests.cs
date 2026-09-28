@@ -124,4 +124,30 @@ public class StaffTests : IAsyncLifetime
         Assert.All(staff, e => Assert.Equal(0, e.ExtraPercent));
         Assert.True(await _f.Query(db => db.AuditEntries.AnyAsync(a => a.Action == "demo_reset")));
     }
+
+    [Fact]
+    public async Task DemoResetStartsFromCleanSlate()
+    {
+        await _f.AddExecutor(1, dailyLimit: 50);
+        await _f.AddExecutor(2, dailyLimit: 50);
+        await _f.Receive(1);
+        await _f.Receive(2);
+        var today = await _f.Run(b => Task.FromResult(b.Today()));
+        Assert.Equal(2, _f.Store.AssignedOn(today, 1) + _f.Store.AssignedOn(today, 2));
+
+        var result = await _f.Staff(s => s.ResetDemoAsync(D, automatic: false, CancellationToken.None));
+
+        Assert.Equal(2, result!.Orders);
+        Assert.False(await _f.Query(db => db.Orders.AnyAsync()));
+        Assert.False(await _f.Query(db => db.Assignments.AnyAsync()));
+        Assert.False(await _f.Query(db => db.OrderStatusChanges.AnyAsync()));
+        Assert.False(await _f.Query(db => db.ExecutorHourStats.AnyAsync()));
+        Assert.False(await _f.Query(db => db.EligibilityHourStats.AnyAsync()));
+        Assert.False(await _f.Query(db => db.OutboxMessages.AnyAsync()));
+        Assert.Equal((0, 0L), (_f.Store.OpenCount(1) + _f.Store.OpenCount(2), _f.Store.OpenWeight(1) + _f.Store.OpenWeight(2)));
+        Assert.Equal(0, _f.Store.AssignedOn(today, 1) + _f.Store.AssignedOn(today, 2));
+
+        await _f.Receive(1); // та же заявка после сброса — новая, а не повтор
+        Assert.NotNull((await _f.Query(db => db.Orders.AsNoTracking().SingleAsync(o => o.Id == 1))).ExecutorId);
+    }
 }

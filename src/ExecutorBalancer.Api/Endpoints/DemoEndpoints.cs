@@ -7,7 +7,9 @@ using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Application.Executors;
+using ExecutorBalancer.Application.Insights;
 using ExecutorBalancer.Application.Rules;
+using ExecutorBalancer.Application.Users;
 using ExecutorBalancer.Domain;
 using ExecutorBalancer.Infrastructure.Workers;
 using Microsoft.EntityFrameworkCore;
@@ -68,8 +70,8 @@ public static class DemoEndpoints
         app.MapPost("/api/admin/demo-reset", async (HttpContext http, CancellationToken ct) =>
             {
                 var access = http.User.Access();
-                var (back, added) = await ResetDemoAsync(http.RequestServices, access.CanSee, automatic: false, ct);
-                return Results.Ok(new { Back = back, Added = added });
+                var (back, added, orders) = await ResetDemoAsync(http.RequestServices, access.CanSee, automatic: false, ct);
+                return Results.Ok(new { Back = back, Added = added, Orders = orders });
             })
             .WithTags("Демонстрация")
             .RequireAuthorization(Policies.Manager)
@@ -245,7 +247,7 @@ public static class DemoEndpoints
 
         flow.MapPost("/simulation/start", async (DepartmentScope d, SimulationStartRequest request, HttpContext context,
             IOptions<DemoOptions> options, IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory,
-            CancellationToken ct) =>
+            ICurrentActor actor, TimeProvider clock, CancellationToken ct) =>
         {
             var limits = FlowLimitsFor(context.User, options.Value);
             if (request.RatePerHour is < 1 || request.RatePerHour > limits.MaxRatePerHour || double.IsNaN(request.RatePerHour))
@@ -262,7 +264,14 @@ public static class DemoEndpoints
                 OrderFields = Specs(snapshot, FieldOwner.Order),
                 limits.StopAfterMinutes,
             };
-            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/start", body, ct)).Result;
+            var started = await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/start", body, ct);
+            if (started.Error is null)
+            {
+                await AuditAsync(db, actor, clock, d.Id, "demo_flow_started",
+                    new { ratePerHour = request.RatePerHour, stopAfterMinutes = limits.StopAfterMinutes }, ct);
+            }
+
+            return started.Result;
         });
 
         flow.MapPost("/simulation/stop", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http,
@@ -271,7 +280,7 @@ public static class DemoEndpoints
                 $"api/ais/simulation/stop?department={await CodeAsync(db, d, ct)}", new { }, ct)).Result);
 
         flow.MapPost("/orders", async (DepartmentScope d, DemoOrderRequest request, IBalancerDbContext db,
-            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
+            IHttpClientFactory http, ExecutorDirectory directory, ICurrentActor actor, TimeProvider clock, CancellationToken ct) =>
         {
             var errors = new Dictionary<string, string[]>();
             if (request.ParentId is <= 0)
@@ -290,13 +299,19 @@ public static class DemoEndpoints
                 return Results.ValidationProblem(errors);
             }
 
-            return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/orders",
+            var created = await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/orders",
                 new
                 {
                     Department = await CodeAsync(db, d, ct), request.ParentId, Attributes = request.Attributes ?? new(),
                     NextOrderId = await NextOrderIdAsync(db, ct),
                 },
-                ct)).Result;
+                ct);
+            if (created.Error is null && created.Body?.TryGetProperty("id", out var id) == true)
+            {
+                await AuditAsync(db, actor, clock, d.Id, "demo_order_sent", new { orderId = id.GetInt64() }, ct);
+            }
+
+            return created.Result;
         });
 
         return app;
@@ -433,23 +448,28 @@ public static class DemoEndpoints
     /// все на работу, «больше нормы» выключен, уволенные восполняются до заведённой численности. Заявки и статистика
     /// остаются. Возвращает, сколько вернулось на работу и сколько заведено заново.
     /// </summary>
-    internal static async Task<(int Back, int Added)> ResetDemoAsync(IServiceProvider services, Func<int, bool> visible,
+    internal static async Task<(int Back, int Added, int Orders)> ResetDemoAsync(IServiceProvider services, Func<int, bool> visible,
         bool automatic, CancellationToken ct)
     {
         var db = services.GetRequiredService<IBalancerDbContext>();
         var staff = services.GetRequiredService<StaffService>();
         var directory = services.GetRequiredService<ExecutorDirectory>();
         var client = services.GetRequiredService<IHttpClientFactory>().CreateClient(AisOptions.HttpClientName);
+        var ai = services.GetRequiredService<AiGate>();
         var departments = await db.Departments.AsNoTracking().OrderBy(x => x.Id).Select(x => x.Id).ToListAsync(ct);
-        int back = 0, added = 0;
+        int back = 0, added = 0, orders = 0;
         foreach (var id in departments.Where(visible))
         {
+            // сначала АИС: поток отдела остановлен и его заявки забыты — новые не придут, пока балансировщик их удаляет
+            await RelayResetAsync(client, await CodeAsync(db, new DepartmentScope(id), ct), ct);
             if (await staff.ResetDemoAsync(id, automatic, ct) is not { } result)
             {
                 continue;
             }
 
+            ai.Forget(id);
             back += result.Back.Count;
+            orders += result.Orders;
             foreach (var executor in result.Back)
             {
                 await MirrorStaffAsync(client, db, id, executor, true, ct);
@@ -461,7 +481,43 @@ public static class DemoEndpoints
             }
         }
 
-        return (back, added);
+        return (back, added, orders);
+    }
+
+    private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Поток и заявка вручную — в журнал: так видно, кто нагружал демо, и по ним же срабатывает автосброс после гостей.</summary>
+    private static async Task AuditAsync(IBalancerDbContext db, ICurrentActor actor, TimeProvider clock, int departmentId,
+        string action, object after, CancellationToken ct)
+    {
+        db.AuditEntries.Add(new AuditEntry
+        {
+            DepartmentId = departmentId,
+            Actor = actor.Name,
+            Action = action,
+            Entity = "demo",
+            EntityId = departmentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DataJson = JsonSerializer.Serialize(new { after }, AuditJson),
+            CreatedAt = clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task RelayResetAsync(HttpClient client, string code, CancellationToken ct)
+    {
+        if (client.BaseAddress is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var response = await client.PostAsJsonAsync($"api/ais/simulation/reset?department={code}", new { }, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            // эмулятор недоступен — данные балансировщика всё равно сбрасываем
+        }
     }
 
     /// <summary>
