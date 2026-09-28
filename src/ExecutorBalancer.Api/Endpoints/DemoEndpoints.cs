@@ -419,15 +419,16 @@ public static class DemoEndpoints
         Attributes = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(e.AttributesJson) ?? [],
     };
 
-    /// <summary>Параметры по справочнику и хотя бы одна характеристика: без них сотрудник берёт любые заявки.</summary>
+    /// <summary>Параметры по справочнику, и заполнены все: без параметра сотрудник берёт любые заявки этого вида.</summary>
     private static async Task CheckSkillsAsync(int departmentId, ExecutorRequest request, ExecutorDirectory directory,
         Dictionary<string, string[]> errors, CancellationToken ct)
     {
         var catalog = (await directory.GetAsync(departmentId, ct)).Catalog;
         var values = catalog.Parse(FieldOwner.Executor, request.Attributes ?? [], errors);
-        if (errors.Count == 0 && !catalog.HasExecutorSkills(values))
+        var missing = catalog.MissingExecutorFields(values);
+        if (errors.Count == 0 && missing.Count > 0)
         {
-            errors["attributes"] = [FieldCatalog.NoSkillsMessage];
+            errors["attributes"] = [FieldCatalog.MissingFieldsMessage(missing)];
         }
     }
 

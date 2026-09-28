@@ -264,10 +264,10 @@ public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirecto
             }
 
             var parseErrors = new Dictionary<string, string[]>();
-            if (!snapshot.Catalog.HasExecutorSkills(snapshot.Catalog.Parse(FieldOwner.Executor, attributes, parseErrors))
-                && parseErrors.Count == 0)
+            var missing = snapshot.Catalog.MissingExecutorFields(snapshot.Catalog.Parse(FieldOwner.Executor, attributes, parseErrors));
+            if (missing.Count > 0 && parseErrors.Count == 0)
             {
-                errors.Add(FieldCatalog.NoSkillsMessage);
+                errors.Add(FieldCatalog.MissingFieldsMessage(missing));
             }
 
             foreach (var (key, messages) in parseErrors)

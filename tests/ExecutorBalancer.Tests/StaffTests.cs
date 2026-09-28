@@ -86,13 +86,17 @@ public class StaffTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ImportRequiresAtLeastOneSkill()
+    public async Task ImportRequiresEveryParameter()
     {
-        var file = Encoding.UTF8.GetBytes("ФИО;Тематики\nБез навыков;\nС навыком;кредит\n");
+        var header = "ФИО;Тематики;Типы заявок;Сегменты клиентов;Категории клиентов;Минимальная сумма;Максимальная сумма";
+        var file = Encoding.UTF8.GetBytes(header + "\n"
+            + "Пустые тематики;;ORDER_1;малый;обычный;0;500000\n"
+            + "Всё заполнено;кредит;ORDER_1;малый;обычный;0;500000\n");
 
         var preview = await _f.Import(i => i.PreviewAsync(D, file, CancellationToken.None));
 
-        Assert.Contains(FieldCatalog.NoSkillsMessage, preview.Rows[0].Errors);
+        var error = Assert.Single(preview.Rows[0].Errors);
+        Assert.StartsWith("не заполнено: Тематики —", error, StringComparison.Ordinal);
         Assert.Empty(preview.Rows[1].Errors);
     }
 }

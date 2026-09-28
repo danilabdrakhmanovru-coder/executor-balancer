@@ -65,8 +65,8 @@ public class OptionLabelTests : IAsyncLifetime
         Assert.Contains("Консультация", template, StringComparison.Ordinal);
 
         var file = Encoding.UTF8.GetBytes("""
-            ФИО;Типы заявок;Тематики
-            Орлова Н. П.;"Консультация, претензия";кредит
+            ФИО;Типы заявок;Тематики;Сегменты клиентов;Категории клиентов;Минимальная сумма;Максимальная сумма
+            Орлова Н. П.;"Консультация, претензия";кредит;малый;обычный;0;500000
             """);
         var result = await _f.Import(i => i.ApplyAsync(D, file, CancellationToken.None));
 

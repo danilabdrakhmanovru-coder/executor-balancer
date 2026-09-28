@@ -120,7 +120,7 @@ export async function dismiss(e, after = refreshExecutors) {
 
 /** Поля сотрудника: ФИО, квалификация, лимит, активность и параметры отдела (справочник). */
 function executorForm(config, source) {
-  const form = attributeForm(config, 'Executor', source.attributes || {});
+  const form = attributeForm(config, 'Executor', source.attributes || {}, { required: true });
   const name = input('text', source.fullName ?? '', { maxlength: '300', required: '', placeholder: 'Фамилия И. О.' });
   const qualification = input('number', source.qualificationWeight ?? 1, { min: '0.1', max: '100', step: '0.1' });
   const limit = input('number', source.dailyLimit ?? '', { min: '0', max: '100000', step: '1', placeholder: 'без лимита' });
