@@ -33,6 +33,9 @@ public sealed class DemoOptions
     /// <summary>Сфера песочницы гостя — шаблон из DomainPresets.</summary>
     public string GuestPreset { get; set; } = "bank";
 
+    /// <summary>Сколько сотрудников гость может завести в своей песочнице.</summary>
+    public int GuestMaxStaff { get; set; } = 50;
+
     /// <summary>С каким потоком открывается песочница гостя (0 — без потока, гость запустит сам).</summary>
     public double GuestFlowRatePerHour { get; set; } = 1200;
 
@@ -71,15 +74,15 @@ public static class DemoEndpoints
 
     public static IEndpointRouteBuilder MapDemoEndpoints(this IEndpointRouteBuilder app)
     {
-        // сотрудники в эмуляторе — только у администратора; поток и заявки вручную — и у руководителя (гостя)
-        var group = DemoGroup(app, Policies.Admin);
+        // сотрудники в эмуляторе — у администратора и у гостя в его песочнице; поток и заявки вручную — у руководителя
+        var group = DemoGroup(app, Policies.Manager).AddEndpointFilter(AdminOrOwnSandbox);
         var flow = DemoGroup(app, Policies.Manager);
 
         // «Вернуть демо в исходное» — и руководителю, и гостю с правами руководителя: после гостей всё приводится в порядок
         app.MapPost("/api/admin/demo-reset", async (HttpContext http, CancellationToken ct) =>
             {
                 var access = http.User.Access();
-                int? sandbox = access.Login == BuiltInAdmin.GuestLogin && access.Departments is { Count: 1 } own ? own.First() : null;
+                var sandbox = GuestSession.SandboxOf(http.User);
                 var (back, added, orders) = await ResetDemoAsync(http.RequestServices, access.CanSee, sandbox, ct);
                 return Results.Ok(new { Back = back, Added = added, Orders = orders });
             })
@@ -105,7 +108,12 @@ public static class DemoEndpoints
             }
 
             var stats = await Relay(client, HttpMethod.Get, $"api/ais/stats?department={code}", null, ct);
-            return stats.Error ?? Results.Ok(new { Simulation = simulation.Body, Ais = stats.Body, Limits = limits });
+            // сколько сотрудников можно завести: гостю — не больше предела песочницы
+            var maxStaff = IsAdmin(context) ? MaxSeedCount : Math.Min(MaxSeedCount, options.Value.GuestMaxStaff);
+            return stats.Error ?? Results.Ok(new
+            {
+                Simulation = simulation.Body, Ais = stats.Body, Limits = new { limits.MaxRatePerHour, limits.StopAfterMinutes, MaxStaff = maxStaff },
+            });
         });
 
         // сотрудники отдела в АИС; кого эмулятор не знает (он держит данные в памяти и после перезапуска пуст) —
@@ -129,12 +137,25 @@ public static class DemoEndpoints
             return Results.Ok(list.OrderBy(x => x.GetProperty("id").GetInt64()));
         });
 
-        group.MapPost("/executors/seed", async (DepartmentScope d, SeedRequest request, IBalancerDbContext db,
-            IHttpClientFactory http, ExecutorDirectory directory, StaffService staff, CancellationToken ct) =>
+        group.MapPost("/executors/seed", async (DepartmentScope d, SeedRequest request, HttpContext context,
+            IOptions<DemoOptions> options, IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory,
+            StaffService staff, CancellationToken ct) =>
         {
             if (request.Count is < 1 or > MaxSeedCount)
             {
                 return Invalid("count", $"от 1 до {MaxSeedCount}");
+            }
+
+            // гость заводит сотрудников только в своей песочнице и не больше предела
+            if (!IsAdmin(context))
+            {
+                var total = request.Mode == "add"
+                    ? await db.Executors.CountAsync(x => x.DepartmentId == d.Id, ct) + request.Count
+                    : request.Count;
+                if (total > options.Value.GuestMaxStaff)
+                {
+                    return Invalid("count", $"в гостевом отделе — до {options.Value.GuestMaxStaff} сотрудников");
+                }
             }
 
             var client = http.CreateClient(AisOptions.HttpClientName);
@@ -169,9 +190,17 @@ public static class DemoEndpoints
         });
 
         // новый сотрудник отдела: заводится в АИС под следующим свободным номером из диапазона отдела
-        group.MapPost("/executors", async (DepartmentScope d, ExecutorRequest request, IBalancerDbContext db,
-            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
+        group.MapPost("/executors", async (DepartmentScope d, ExecutorRequest request, HttpContext context,
+            IOptions<DemoOptions> options, IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory,
+            CancellationToken ct) =>
         {
+            if (!IsAdmin(context)
+                && await db.Executors.CountAsync(x => x.DepartmentId == d.Id, ct) >= options.Value.GuestMaxStaff)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Сотрудников достаточно",
+                    detail: $"в гостевом отделе — до {options.Value.GuestMaxStaff} сотрудников");
+            }
+
             var errors = RequestValidation.Validate(request);
             if (errors.Count == 0)
             {
@@ -218,9 +247,15 @@ public static class DemoEndpoints
             return created.Error ?? Results.Ok(new { Id = id });
         });
 
-        group.MapPut("/executors/{id:long}", async (DepartmentScope d, long id, ExecutorRequest request,
+        group.MapPut("/executors/{id:long}", async (DepartmentScope d, long id, ExecutorRequest request, HttpContext context,
             IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
+            // гость правит только сотрудников своей песочницы: иначе через АИС можно было бы переписать чужого
+            if (!IsAdmin(context) && !await db.Executors.AnyAsync(x => x.Id == id && x.DepartmentId == d.Id, ct))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Сотрудник не найден");
+            }
+
             var errors = RequestValidation.Validate(request);
             if (id <= 0)
             {
@@ -320,6 +355,27 @@ public static class DemoEndpoints
                 options.ManagerFlowMinutes > 0 ? options.ManagerFlowMinutes : null);
 
     private sealed record FlowLimits(double MaxRatePerHour, int? StopAfterMinutes);
+
+    private static bool IsAdmin(HttpContext context) => context.User.Access().AtLeast(UserRole.Admin);
+
+    /// <summary>
+    /// Сотрудники тестового стенда: администратор — в любом отделе, гость — только в своей песочнице. Адрес без отдела
+    /// (например, перерыв напрямую в АИС) — только администратору.
+    /// </summary>
+    private static async ValueTask<object?> AdminOrOwnSandbox(EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var user = context.HttpContext.User;
+        if (user.Access().AtLeast(UserRole.Admin)
+            || (GuestSession.SandboxOf(user) is { } sandbox
+                && context.Arguments.OfType<DepartmentScope>().Any(d => d.Id == sandbox)))
+        {
+            return await next(context);
+        }
+
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "Сотрудников тестового стенда заводит администратор");
+    }
 
     private static RouteGroupBuilder DemoGroup(IEndpointRouteBuilder app, string policy) =>
         app.MapGroup("/api/admin/demo")

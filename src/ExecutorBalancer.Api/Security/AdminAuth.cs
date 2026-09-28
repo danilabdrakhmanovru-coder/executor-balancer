@@ -141,6 +141,8 @@ public static partial class AdminAuth
                 name = context.User.FindFirstValue(Policies.DisplayNameClaim) ?? access.Login,
                 role = access.Role,
                 departments = access.Departments,
+                // своя песочница гостя: в ней он заводит сотрудников тестового стенда сам
+                sandbox = SandboxOf(context.User),
                 demo = demo.Value.Enabled,
             });
         });
@@ -249,11 +251,7 @@ public static partial class AdminAuth
 
     private static string GuestStamp(UserRole role) => "guest-" + role;
 
-    /// <summary>Песочница гостя — единственный отдел в его сессии; у наблюдателя-гостя её нет (видит все отделы).</summary>
-    private static int? SandboxOf(ClaimsPrincipal user) =>
-        user.Identity?.Name == BuiltInAdmin.GuestLogin && user.Access().Departments is { Count: 1 } departments
-            ? departments.First()
-            : null;
+    private static int? SandboxOf(ClaimsPrincipal user) => GuestSession.SandboxOf(user);
 
     /// <summary>
     /// Вход гостем: без пароля, с правами из настроек сервера (GUEST_ACCESS в .env). Наблюдатель смотрит все отделы;

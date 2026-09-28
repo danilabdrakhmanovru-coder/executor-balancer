@@ -48,6 +48,7 @@ services:
       # и сколько песочниц может быть сразу
       Demo__GuestResetMinutes: ${GUEST_RESET_MINUTES:-30}
       Demo__MaxGuests: ${GUEST_MAX:-15}
+      Demo__GuestMaxStaff: ${GUEST_MAX_STAFF:-50}
       # поток заявок на «Тестовом стенде», запущенный руководителем или гостем: предел скорости и через сколько минут он остановится сам
       Demo__ManagerMaxRatePerHour: ${GUEST_FLOW_MAX_RATE:-4000}
       Demo__ManagerFlowMinutes: ${GUEST_FLOW_MINUTES:-20}

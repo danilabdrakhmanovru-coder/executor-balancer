@@ -1,7 +1,7 @@
 // Точка входа: вход, отдел, разделы и вкладки с учётом роли, периодическое обновление активной вкладки.
 import { api, onUnauthorized, problemText } from './api.js';
 import { $, el, icon } from './dom.js';
-import { setSession, session, can, demoAdmin, demoManager, ROLE_TITLE } from './session.js';
+import { setSession, session, can, demoAdmin, demoManager, demoStaff, ROLE_TITLE } from './session.js';
 import { initUsers, refreshUsers } from './users.js';
 import { initOverview, refreshOverview, resetOverview, setOverviewDemo } from './overview.js';
 import { initAnalytics, refreshAnalytics, exportLink } from './analytics.js';
@@ -72,6 +72,18 @@ const PROFILE_HASH = /^executor-(\d{1,18})$/;
 let timer = null;
 let busy = false;
 let again = false;
+// часы в шапке идут каждую секунду; данные вкладки обновляются по своему таймеру (см. every)
+let offline = false;
+let dataAt = null;
+const clockTime = (d) => d.toLocaleTimeString('ru-RU');
+
+function tick() {
+  const node = $('updated');
+  if (offline) { node.textContent = 'нет связи с сервером'; return; }
+  node.textContent = clockTime(new Date());
+  node.title = dataAt ? `Данные обновлены в ${clockTime(dataAt)}` : '';
+}
+setInterval(tick, 1000);
 
 async function refresh() {
   // обновление уже идёт (например, по таймеру) — повторим сразу после него, иначе смена вкладки
@@ -80,10 +92,12 @@ async function refresh() {
   busy = true;
   try {
     await TABS[active].refresh();
-    $('updated').textContent = `обновлено ${new Date().toLocaleTimeString('ru-RU')}`;
+    offline = false;
+    dataAt = new Date();
   } catch (e) {
-    if (e.status !== 401) $('updated').textContent = 'нет связи с сервером';
+    if (e.status !== 401) offline = true;
   } finally {
+    tick();
     busy = false;
     if (again) { again = false; refresh(); }
   }
@@ -148,7 +162,7 @@ async function showGuestOption() {
   $('guest-hint').textContent = guest === 'Manager'
     ? 'Без пароля, с правами руководителя. Для вас создаётся свой отдел с сотрудниками и потоком заявок — его видите только вы, '
       + 'другие гости вам не мешают. Можно: мониторинг, аналитика, перерывы и увольнение, «больше нормы», ИИ-разбор, поток и '
-      + 'заявка вручную на «Тестовом стенде». Отдел удаляется, когда вы выходите или закрываете сайт больше чем на полчаса.'
+      + 'заявка вручную и свои сотрудники на «Тестовом стенде». Отдел удаляется, когда вы выходите или закрываете сайт больше чем на полчаса.'
     : 'Без пароля, только просмотр: мониторинг, заявки, сотрудники, аналитика и настройки — изменить ничего нельзя.';
 }
 
@@ -164,9 +178,11 @@ async function showApp(me) {
   await loadDepartments();
   exportLink();
   // демо-режим (Demo:Enabled) — значок у всех; тестовый стенд и правка сотрудников через эмулятор — у администратора
-  setExecutorsEditable(demoAdmin());
-  setOverviewDemo(demoAdmin());
-  setProfileEditable(demoAdmin());
+  setExecutorsEditable(demoStaff());
+  setOverviewDemo(demoStaff());
+  setProfileEditable(demoStaff());
+  for (const node of document.querySelectorAll('.demo-staff')) node.classList.toggle('hidden', !demoStaff());
+  for (const node of document.querySelectorAll('.demo-staff-note')) node.classList.toggle('hidden', demoStaff());
   setStartDemo(demoManager());
   setDepartmentsDemo(demoAdmin());
   $('tab-button-demo').classList.toggle('hidden', !demoManager());

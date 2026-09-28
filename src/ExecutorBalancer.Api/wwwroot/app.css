@@ -345,7 +345,7 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .import-preview { max-height: 45vh; overflow: auto; }
 
 /* роли: кнопки, которые вернули бы «нет прав», не показываются (права всё равно проверяет сервер) */
-body.role-viewer .need-manager, body:not(.role-admin) .need-admin, body.role-admin .need-not-admin { display: none !important; }
+body.role-viewer .need-manager, body:not(.role-admin) .need-admin { display: none !important; }
 .user-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.15;
   white-space: nowrap; }
 .user-chip .user-text { display: flex; flex-direction: column; }
@@ -378,3 +378,6 @@ tr.row-highlight td { background: var(--tblr-yellow-lt, rgba(247, 183, 49, .18))
   body.print-ai #ai-run, body.print-ai .ai-report-tools, body.print-ai .ai-links { display: none !important; }
   body.print-ai .ai-print-head { display: block; color: #555; }
 }
+
+/* часы в шапке: цифры одной ширины — текст не дёргается каждую секунду */
+#updated { font-variant-numeric: tabular-nums; }

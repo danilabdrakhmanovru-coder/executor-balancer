@@ -3,7 +3,7 @@
 const RANK = { Viewer: 0, Manager: 1, Admin: 2 };
 export const ROLE_TITLE = { Viewer: 'наблюдатель', Manager: 'руководитель', Admin: 'администратор' };
 
-let me = { login: '', name: '', role: 'Viewer', departments: null, demo: false };
+let me = { login: '', name: '', role: 'Viewer', departments: null, demo: false, sandbox: null };
 
 export function setSession(value) {
   me = { ...me, ...value, role: RANK[value?.role] === undefined ? 'Viewer' : value.role };
@@ -21,3 +21,6 @@ export const demoAdmin = () => me.demo && can('Admin');
 
 /** Тестовый стенд: поток и заявки вручную — с руководителя (и гостя-руководителя), заведение сотрудников — у администратора. */
 export const demoManager = () => me.demo && can('Manager');
+
+/** Сотрудники тестового стенда (завести, «ровно столько», изменить): администратор — везде, гость — в своей песочнице. */
+export const demoStaff = () => me.demo && (can('Admin') || me.sandbox != null);

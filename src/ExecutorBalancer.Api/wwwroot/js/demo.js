@@ -143,8 +143,15 @@ function renderCapacity() {
 }
 
 /** Предел скорости от сервера: у руководителя и гостя — не быстрее кейса, поток сам останавливается. */
+function renderSeedLabel() {
+  if (!seedCount) return;
+  seedCount.max = String(maxSeed);
+  $('demo-seed-count').replaceChildren(field(`Сколько сотрудников (от 1 до ${maxSeed})`, seedCount));
+}
+
 function applyLimits(limits) {
   if (!limits) return;
+  if (limits.maxStaff && limits.maxStaff !== maxSeed) { maxSeed = limits.maxStaff; renderSeedLabel(); }
   const rate = $('demo-rate');
   const max = String(Math.max(10, Math.floor(limits.maxRatePerHour / 10) * 10));
   if (rate.max === max) return;
@@ -193,17 +200,19 @@ async function sendOrder() {
   }
 }
 
-const MAX_SEED = 100; // как DemoEndpoints.MaxSeedCount
+let maxSeed = 100; // как DemoEndpoints.MaxSeedCount; гостю сервер сообщает свой предел (limits.maxStaff)
+let seedCount = null;
 
 export function initDemo() {
-  const count = input('number', '15', { min: '1', max: String(MAX_SEED), step: '1', required: '' });
-  $('demo-seed-count').replaceChildren(field(`Сколько сотрудников (от 1 до ${MAX_SEED})`, count));
+  const count = input('number', '15', { min: '1', max: String(maxSeed), step: '1', required: '' });
+  seedCount = count;
+  renderSeedLabel();
   /** add — прибавить к имеющимся; exact — сделать в отделе ровно столько. */
   const seed = async (mode) => {
     const n = Number(count.value);
-    if (!Number.isInteger(n) || n < 1 || n > MAX_SEED) {
+    if (!Number.isInteger(n) || n < 1 || n > maxSeed) {
       // не отправляем заведомо неверное число: сразу говорим, что не так
-      toast(`Число сотрудников — от 1 до ${MAX_SEED}`, 'bad');
+      toast(`Число сотрудников — от 1 до ${maxSeed}`, 'bad');
       count.focus();
       return;
     }
