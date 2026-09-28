@@ -8,6 +8,7 @@ import { openOrder } from './overview.js';
 import { showCheck } from './preview.js';
 
 let config = null;
+let staff = [];
 let orderForm = null;
 let lastRunning = null;
 
@@ -83,6 +84,8 @@ export async function refreshDemo() {
   renderFlow(status, summary);
   renderSimulation(status?.simulation);
   renderFeed(feed);
+  staff = summary.executors ?? [];
+  renderCapacity();
   const total = summary.executors?.length ?? 0;
   $('demo-executors-count').textContent = total
     ? `Сейчас в отделе сотрудников: ${total}, из них на работе: ${summary.totals.activeExecutors}.`
@@ -96,6 +99,45 @@ async function reloadConfig() {
   config = await api('/api/admin/config');
   orderForm = attributeForm(config, 'Order');
   $('demo-order-fields').replaceChildren(...orderForm.nodes);
+}
+
+const SHIFT_HOURS = 8;
+
+/**
+ * Сколько заявок в час разберут сотрудники отдела при своих нормах (смена 8 часов) и на сколько хватит норм
+ * при выбранном потоке. 4000 в час из кейса — это проверка скорости: живые нормы на 10–30 человек за такой
+ * поток заканчиваются за минуты, дальше заявки берут только сотрудники без лимита и режим «больше нормы».
+ */
+function renderCapacity() {
+  const box = $('demo-capacity');
+  const active = staff.filter((e) => e.isActive);
+  if (!active.length) { box.replaceChildren(); return; }
+  const limits = active.map((e) => e.dailyLimit).filter((l) => l != null).sort((a, b) => a - b);
+  const typical = limits.length ? limits[Math.floor(limits.length / 2)] : 80;
+  const perHour = Math.max(1, Math.round(active.reduce((s, e) => s + (e.dailyLimit ?? typical), 0) / SHIFT_HOURS));
+  const left = active.filter((e) => e.dailyLimit != null)
+    .reduce((s, e) => s + Math.max(0, e.dailyLimit - e.assignedToday), 0);
+  const unlimited = active.length - limits.length;
+  const rate = Number($('demo-rate').value);
+  const lines = [el('p', `${active.length} на работе за ${SHIFT_HOURS}-часовую смену разберут около ${fmt(perHour)} заявок в час `
+    + `(нормы — ${limits.length ? `от ${limits[0]} до ${limits[limits.length - 1]} в день` : 'не заданы'}${unlimited ? `, без лимита — ${unlimited}` : ''}).`,
+  'mb-1')];
+  if (rate > perHour * 1.2) {
+    const minutes = Math.round(left / rate * 60);
+    lines.push(el('p', `При ${fmt(rate)} в час этого мало: оставшихся норм (${fmt(left)} заявок) хватит примерно на `
+      + `${minutes >= 90 ? `${fmt(Math.round(minutes / 6) / 10)} ч` : `${fmt(minutes)} мин`}, дальше заявки получат только `
+      + `${unlimited ? `сотрудники без лимита (${unlimited})` : 'режим «больше нормы» или они будут ждать'}. Такой поток — `
+      + 'проверка скорости; для обычного рабочего дня выберите реалистичный.', 'warn-text mb-1'));
+  }
+  const realistic = Math.min(40000, Math.max(10, Math.round(perHour / 10) * 10));
+  const set = el('button', null, 'btn btn-sm');
+  set.type = 'button';
+  set.append(icon('users'), `Реалистичный поток: ${fmt(realistic)} в час`);
+  set.addEventListener('click', () => {
+    $('demo-rate').value = String(realistic);
+    $('demo-rate').dispatchEvent(new Event('input'));
+  });
+  box.replaceChildren(...lines, set);
 }
 
 function rateText(rate) {
@@ -164,7 +206,7 @@ export function initDemo() {
   $('demo-seed-exact').addEventListener('click', () => seed('exact'));
 
   const rate = $('demo-rate');
-  const label = () => { $('demo-rate-label').textContent = rateText(Number(rate.value)); };
+  const label = () => { $('demo-rate-label').textContent = rateText(Number(rate.value)); renderCapacity(); };
   rate.addEventListener('input', label);
   label();
   $('demo-start').addEventListener('click', async () => {

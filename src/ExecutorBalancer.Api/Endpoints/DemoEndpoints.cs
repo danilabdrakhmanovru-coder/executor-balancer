@@ -46,7 +46,6 @@ public static class DemoEndpoints
     public const double MaxRatePerHour = 72_000;
     private const long IdsPerDepartment = 1000;
 
-    private static readonly int?[] DailyLimits = [null, null, 60, 80, 120, 200];
     private static readonly decimal[] Qualifications = [0.8m, 1m, 1m, 1.2m, 1.5m, 2m];
 
     public static IEndpointRouteBuilder MapDemoEndpoints(this IEndpointRouteBuilder app)
@@ -366,7 +365,7 @@ public static class DemoEndpoints
             Count = count,
             Fields = Specs(snapshot, FieldOwner.Executor),
             Names = DomainPresets.ExecutorNames,
-            DailyLimits,
+            DailyLimits = await DailyLimitsAsync(db, departmentId, ct),
             Qualifications,
         };
         return await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
@@ -469,7 +468,7 @@ public static class DemoEndpoints
             Count = count,
             Fields = Specs(snapshot, FieldOwner.Executor),
             Names = DomainPresets.ExecutorNames,
-            DailyLimits,
+            DailyLimits = await DailyLimitsAsync(db, departmentId, ct),
             Qualifications,
             KeepOthers = true,
             NameOffset = existing,
@@ -477,6 +476,11 @@ public static class DemoEndpoints
         var created = await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
         return created.Error ?? Results.Ok(new { Added = count, Removed = 0 });
     }
+
+    /// <summary>Нормы демо-сотрудников — по сфере отдела (шаблону), чтобы они были похожи на жизнь.</summary>
+    private static async Task<int?[]> DailyLimitsAsync(IBalancerDbContext db, int departmentId, CancellationToken ct) =>
+        DomainPresets.DailyLimits(await db.Departments.AsNoTracking().Where(x => x.Id == departmentId)
+            .Select(x => x.PresetId).FirstOrDefaultAsync(ct));
 
     /// <summary>Код отдела для АИС. Формат кода проверен при создании отдела — в адрес запроса он попадает как есть.</summary>
     private static Task<string> CodeAsync(IBalancerDbContext db, DepartmentScope d, CancellationToken ct) =>

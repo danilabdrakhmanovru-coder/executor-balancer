@@ -208,8 +208,9 @@
                     <p class="text-secondary">Эмулятор создаёт обращения этого отдела с заданной скоростью, а сотрудники в нём
                       «работают»: каждую секунду часть назначенных заявок решается, отклоняется или уходит на доработку и потом
                       возвращается. Потоки разных отделов идут одновременно и независимо.</p>
-                    <input id="demo-rate" class="form-range" type="range" min="500" max="40000" step="500" value="4000" aria-label="Скорость потока">
+                    <input id="demo-rate" class="form-range" type="range" min="10" max="40000" step="10" value="4000" aria-label="Скорость потока">
                     <p id="demo-rate-label" class="rate"></p>
+                    <div id="demo-capacity" class="capacity mb-3"></div>
                     <div class="btn-list">
                       <button id="demo-start" class="btn btn-success" type="button"><svg class="icon"><use href="icons.svg#player-play"></use></svg>Запустить</button>
                       <button id="demo-stop" class="btn" type="button"><svg class="icon"><use href="icons.svg#player-stop"></use></svg>Остановить</button>
