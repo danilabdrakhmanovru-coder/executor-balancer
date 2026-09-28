@@ -6,6 +6,9 @@
 
 Стек: .NET 10, ASP.NET Core Minimal API, EF Core + PostgreSQL, Redis (атомарный выбор), xUnit, Python для нагрузки.
 
+Сайт: https://exbalancer.ru (вход гостем — без пароля). Презентация команды Void:
+[PDF](docs/Executor-Balancer.pdf) · [PowerPoint](docs/Executor-Balancer.pptx).
+
 ## Структура
 
 ```
@@ -20,6 +23,7 @@ scripts/check_lua.py                 проверка Lua-скриптов на 
 docs/DECISIONS.md                    трактовки ТЗ и принятые решения
 docs/ARCHITECTURE.md                 BPMN, sequence-диаграмма, ERD, алгоритм и альтернативы
 docs/DEPLOY.md                       выкладка на сервер: HTTPS (Caddy), YandexGPT Pro
+docs/Executor-Balancer.pdf           презентация (есть и .pptx)
 deploy/Caddyfile                     вход из интернета по HTTPS для профиля public
 ```
 
