@@ -3,7 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Executor Balancer</title>
+  <title>Executor Balancer — распределение заявок в реальном времени</title>
+  <meta name="description" content="Сервис распределяет заявки между сотрудниками за миллисекунды: только тем, кто подходит по правилам, и поровну по нагрузке — с объяснением каждого решения.">
+  <meta name="theme-color" content="#066fd1">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <!-- превью ссылки в мессенджерах; %SITE_URL% и %GUEST_NOTE% подставляет сервер (Endpoints/IndexPage.cs) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Executor Balancer">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:title" content="Executor Balancer — распределение заявок в реальном времени">
+  <meta property="og:description" content="Каждая заявка — тому, кто подходит по правилам и сейчас загружен меньше всех. Справедливо, объяснимо, за миллисекунды.%GUEST_NOTE%">
+  <meta property="og:url" content="%SITE_URL%/">
+  <meta property="og:image" content="%SITE_URL%/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Executor Balancer: заявка уходит сотруднику с наименьшей нагрузкой, с объяснением">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="stylesheet" href="vendor/tabler/tabler.min.css">
   <link rel="stylesheet" href="app.css">
   <script type="module" src="js/main.js"></script>
