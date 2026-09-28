@@ -345,7 +345,7 @@ tr.fresh { animation: flash 1.2s ease-out; }
 .import-preview { max-height: 45vh; overflow: auto; }
 
 /* роли: кнопки, которые вернули бы «нет прав», не показываются (права всё равно проверяет сервер) */
-body.role-viewer .need-manager, body:not(.role-admin) .need-admin { display: none !important; }
+body.role-viewer .need-manager, body:not(.role-admin) .need-admin, body.role-admin .need-not-admin { display: none !important; }
 .user-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.15;
   white-space: nowrap; }
 .user-chip .user-text { display: flex; flex-direction: column; }

@@ -67,8 +67,9 @@ function renderSimulation(sim) {
   const running = Boolean(sim?.running);
   $('demo-start').disabled = running;
   $('demo-stop').disabled = !running;
+  const stops = sim?.stopsAt ? `, остановится сам в ${new Date(sim.stopsAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : '';
   $('demo-sim-status').textContent = running
-    ? `Идёт: создано ${fmt(sim.created)}, решено ${fmt(sim.accepted)}, отклонено ${fmt(sim.rejected)}, на доработке было ${fmt(sim.sentToRework)}`
+    ? `Идёт: создано ${fmt(sim.created)}, решено ${fmt(sim.accepted)}, отклонено ${fmt(sim.rejected)}, на доработке было ${fmt(sim.sentToRework)}${stops}`
     : 'Поток остановлен.';
   if (lastRunning !== running) $('demo-flow').classList.toggle('running', running);
   lastRunning = running;
@@ -83,6 +84,7 @@ export async function refreshDemo() {
   $('demo-ais-error').textContent = status ? '' : 'Эмулятор АИС недоступен — проверьте, что он запущен.';
   renderFlow(status, summary);
   renderSimulation(status?.simulation);
+  applyLimits(status?.limits);
   renderFeed(feed);
   staff = summary.executors ?? [];
   renderCapacity();
@@ -129,7 +131,7 @@ function renderCapacity() {
       + `${unlimited ? `сотрудники без лимита (${unlimited})` : 'режим «больше нормы» или они будут ждать'}. Такой поток — `
       + 'проверка скорости; для обычного рабочего дня выберите реалистичный.', 'warn-text mb-1'));
   }
-  const realistic = Math.min(40000, Math.max(10, Math.round(perHour / 10) * 10));
+  const realistic = Math.min(Number($('demo-rate').max), Math.max(10, Math.round(perHour / 10) * 10));
   const set = el('button', null, 'btn btn-sm');
   set.type = 'button';
   set.append(icon('users'), `Реалистичный поток: ${fmt(realistic)} в час`);
@@ -138,6 +140,20 @@ function renderCapacity() {
     $('demo-rate').dispatchEvent(new Event('input'));
   });
   box.replaceChildren(...lines, set);
+}
+
+/** Предел скорости от сервера: у руководителя и гостя — не быстрее кейса, поток сам останавливается. */
+function applyLimits(limits) {
+  if (!limits) return;
+  const rate = $('demo-rate');
+  const max = String(Math.max(10, Math.floor(limits.maxRatePerHour / 10) * 10));
+  if (rate.max === max) return;
+  rate.max = max;
+  if (Number(rate.value) > Number(max)) rate.value = max;
+  rate.dispatchEvent(new Event('input'));
+  $('demo-rate-limit').textContent = limits.stopAfterMinutes
+    ? `Здесь — до ${fmt(Number(max))} заявок в час; поток сам остановится через ${limits.stopAfterMinutes} мин.`
+    : '';
 }
 
 function rateText(rate) {

@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
 using ExecutorBalancer.Api.Contracts;
 using ExecutorBalancer.Api.Security;
@@ -23,6 +24,12 @@ public sealed class DemoOptions
 
     /// <summary>Через сколько минут без изменений от гостей демо само возвращается в исходное (0 — не возвращать).</summary>
     public int GuestResetMinutes { get; set; } = 30;
+
+    /// <summary>Поток, запущенный руководителем или гостем: не быстрее стольких заявок в час (4000 — как в кейсе).</summary>
+    public double ManagerMaxRatePerHour { get; set; } = 4000;
+
+    /// <summary>…и сам останавливается через столько минут — чтобы забытый поток не шёл сутками.</summary>
+    public int ManagerFlowMinutes { get; set; } = 20;
 }
 
 /// <param name="Mode">
@@ -53,15 +60,9 @@ public static class DemoEndpoints
 
     public static IEndpointRouteBuilder MapDemoEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/demo")
-            .WithTags("Демонстрация")
-            .RequireAuthorization(Policies.Admin)
-            .AddEndpointFilter<CsrfHeaderFilter>()
-            .AddEndpointFilter(async (context, next) =>
-                context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled
-                    ? await next(context)
-                    : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"))
-            .AddEndpointFilter(DepartmentScope.RequireDepartment);
+        // сотрудники в эмуляторе — только у администратора; поток и заявки вручную — и у руководителя (гостя)
+        var group = DemoGroup(app, Policies.Admin);
+        var flow = DemoGroup(app, Policies.Manager);
 
         // «Вернуть демо в исходное» — и руководителю, и гостю с правами руководителя: после гостей всё приводится в порядок
         app.MapPost("/api/admin/demo-reset", async (HttpContext http, CancellationToken ct) =>
@@ -78,8 +79,11 @@ public static class DemoEndpoints
                     ? await next(context)
                     : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"));
 
-        group.MapGet("/status", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http, CancellationToken ct) =>
+        flow.MapGet("/status", async (DepartmentScope d, HttpContext context, IOptions<DemoOptions> options, IBalancerDbContext db,
+            IHttpClientFactory http, CancellationToken ct) =>
         {
+            // сколько можно этому пользователю: интерфейс ставит такой предел ползунку
+            var limits = FlowLimitsFor(context.User, options.Value);
             var code = await CodeAsync(db, d, ct);
             var client = http.CreateClient(AisOptions.HttpClientName);
             var simulation = await Relay(client, HttpMethod.Get, $"api/ais/simulation?department={code}", null, ct);
@@ -89,7 +93,7 @@ public static class DemoEndpoints
             }
 
             var stats = await Relay(client, HttpMethod.Get, $"api/ais/stats?department={code}", null, ct);
-            return stats.Error ?? Results.Ok(new { Simulation = simulation.Body, Ais = stats.Body });
+            return stats.Error ?? Results.Ok(new { Simulation = simulation.Body, Ais = stats.Body, Limits = limits });
         });
 
         // сотрудники отдела в АИС; кого эмулятор не знает (он держит данные в памяти и после перезапуска пуст) —
@@ -239,12 +243,14 @@ public static class DemoEndpoints
             (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, $"api/ais/executors/{id}/active",
                 request, ct)).Result);
 
-        group.MapPost("/simulation/start", async (DepartmentScope d, SimulationStartRequest request, IBalancerDbContext db,
-            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
+        flow.MapPost("/simulation/start", async (DepartmentScope d, SimulationStartRequest request, HttpContext context,
+            IOptions<DemoOptions> options, IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory,
+            CancellationToken ct) =>
         {
-            if (request.RatePerHour is < 1 or > MaxRatePerHour || double.IsNaN(request.RatePerHour))
+            var limits = FlowLimitsFor(context.User, options.Value);
+            if (request.RatePerHour is < 1 || request.RatePerHour > limits.MaxRatePerHour || double.IsNaN(request.RatePerHour))
             {
-                return Invalid("ratePerHour", $"от 1 до {MaxRatePerHour} заявок в час");
+                return Invalid("ratePerHour", $"от 1 до {limits.MaxRatePerHour:0} заявок в час");
             }
 
             var snapshot = await directory.GetAsync(d.Id, ct);
@@ -254,16 +260,17 @@ public static class DemoEndpoints
                 NextOrderId = await NextOrderIdAsync(db, ct),
                 request.RatePerHour,
                 OrderFields = Specs(snapshot, FieldOwner.Order),
+                limits.StopAfterMinutes,
             };
             return (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/start", body, ct)).Result;
         });
 
-        group.MapPost("/simulation/stop", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http,
+        flow.MapPost("/simulation/stop", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http,
             CancellationToken ct) =>
             (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post,
                 $"api/ais/simulation/stop?department={await CodeAsync(db, d, ct)}", new { }, ct)).Result);
 
-        group.MapPost("/orders", async (DepartmentScope d, DemoOrderRequest request, IBalancerDbContext db,
+        flow.MapPost("/orders", async (DepartmentScope d, DemoOrderRequest request, IBalancerDbContext db,
             IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
             var errors = new Dictionary<string, string[]>();
@@ -294,6 +301,26 @@ public static class DemoEndpoints
 
         return app;
     }
+
+    /// <summary>Администратор — без ограничений; у руководителя и гостя поток не быстрее кейса и сам останавливается.</summary>
+    private static FlowLimits FlowLimitsFor(ClaimsPrincipal user, DemoOptions options) =>
+        user.Access().AtLeast(UserRole.Admin)
+            ? new FlowLimits(MaxRatePerHour, null)
+            : new FlowLimits(Math.Min(MaxRatePerHour, options.ManagerMaxRatePerHour),
+                options.ManagerFlowMinutes > 0 ? options.ManagerFlowMinutes : null);
+
+    private sealed record FlowLimits(double MaxRatePerHour, int? StopAfterMinutes);
+
+    private static RouteGroupBuilder DemoGroup(IEndpointRouteBuilder app, string policy) =>
+        app.MapGroup("/api/admin/demo")
+            .WithTags("Демонстрация")
+            .RequireAuthorization(policy)
+            .AddEndpointFilter<CsrfHeaderFilter>()
+            .AddEndpointFilter(async (context, next) =>
+                context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled
+                    ? await next(context)
+                    : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"))
+            .AddEndpointFilter(DepartmentScope.RequireDepartment);
 
     /// <summary>
     /// Как генерировать значения параметров: по справочнику, с подсказками из шаблонов сфер.

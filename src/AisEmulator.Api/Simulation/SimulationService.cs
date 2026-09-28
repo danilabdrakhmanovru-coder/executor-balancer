@@ -13,9 +13,11 @@ public sealed record SimulationRequest(
     string? Department = null,
     double HastyShare = 0.15,
     double ParentProbability = 0.08,
-    long? NextOrderId = null)
+    long? NextOrderId = null,
+    int? StopAfterMinutes = null)
 {
     public const double MaxRatePerHour = 72_000;
+    public const int MaxStopAfterMinutes = 24 * 60;
 
     public string? Validate()
     {
@@ -32,6 +34,11 @@ public sealed record SimulationRequest(
         if (NextOrderId is < 1)
         {
             return "номер следующей заявки должен быть положительным";
+        }
+
+        if (StopAfterMinutes is < 1 or > MaxStopAfterMinutes)
+        {
+            return $"остановка — через 1–{MaxStopAfterMinutes} минут";
         }
 
         if (HastyShare is < 0 or > 1 || ParentProbability is < 0 or > 1)
@@ -56,7 +63,8 @@ public sealed record SimulationStatus(
     long Accepted,
     long Rejected,
     long SentToRework,
-    long Returned);
+    long Returned,
+    DateTimeOffset? StopsAt = null);
 
 /// <summary>
 /// Симуляция живой АИС для демонстрации: поток заявок от клиентов и работа исполнителей
@@ -79,6 +87,9 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
         public string? Department { get; } = department;
         public SimulationRequest? Settings { get; set; }
         public DateTimeOffset? StartedAt { get; set; }
+
+        /// <summary>Когда поток остановится сам (запуск руководителем или гостем); null — пока не остановят.</summary>
+        public DateTimeOffset? StopsAt { get; set; }
         public double Due { get; set; }
         public DateTimeOffset LastWork { get; set; } = DateTimeOffset.MinValue;
         public Dictionary<long, DateTimeOffset> Rework { get; } = new();
@@ -107,6 +118,7 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
 
             flow.Settings = request;
             flow.StartedAt ??= DateTimeOffset.UtcNow;
+            flow.StopsAt = request.StopAfterMinutes is { } minutes ? DateTimeOffset.UtcNow.AddMinutes(minutes) : null;
         }
 
         logger.LogInformation("Симуляция {Department}: {Rate} заявок в час", request.Department ?? "(основной)", request.RatePerHour);
@@ -121,6 +133,7 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
             {
                 flow.Settings = null;
                 flow.StartedAt = null;
+                flow.StopsAt = null;
             }
         }
 
@@ -138,7 +151,7 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
 
             return new SimulationStatus(flow.Settings is not null, flow.Settings?.RatePerHour ?? 0, flow.StartedAt,
                 Interlocked.Read(ref flow.Created), Interlocked.Read(ref flow.Accepted), Interlocked.Read(ref flow.Rejected),
-                Interlocked.Read(ref flow.ToRework), Interlocked.Read(ref flow.Returned));
+                Interlocked.Read(ref flow.ToRework), Interlocked.Read(ref flow.Returned), flow.StopsAt);
         }
     }
 
@@ -150,6 +163,13 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
             List<(Flow Flow, SimulationRequest Settings)> running;
             lock (_gate)
             {
+                var now = DateTimeOffset.UtcNow;
+                foreach (var flow in _flows.Values.Where(f => f.StopsAt <= now))
+                {
+                    logger.LogInformation("Симуляция {Department} остановлена по времени", flow.Department ?? "(основной)");
+                    (flow.Settings, flow.StartedAt, flow.StopsAt) = (null, null, null);
+                }
+
                 running = _flows.Values.Where(f => f.Settings is not null).Select(f => (f, f.Settings!)).ToList();
             }
 
