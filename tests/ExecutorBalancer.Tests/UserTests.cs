@@ -65,6 +65,7 @@ public class UserTests : IAsyncLifetime
 
     [Theory]
     [InlineData("admin", "Надёжный-пароль-1", "login")]
+    [InlineData("guest", "Надёжный-пароль-1", "login")]
     [InlineData("A", "Надёжный-пароль-1", "login")]
     [InlineData("петрова", "Надёжный-пароль-1", "login")]
     [InlineData("petrova", "короткий", "password")]

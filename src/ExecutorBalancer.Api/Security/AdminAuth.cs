@@ -18,6 +18,17 @@ public sealed class AdminOptions
     public const string Section = "Admin";
 
     public string Password { get; set; } = "";
+
+    /// <summary>
+    /// Гостевой вход без пароля — для жюри и тех, кому дали только ссылку: пусто — выключен, Viewer — только
+    /// просмотр, Manager — можно ещё отправлять на перерыв, менять режим «больше нормы», запускать ИИ-разбор.
+    /// Администратором гость не бывает. Выключили — открытые гостевые сессии закрываются.
+    /// </summary>
+    public string GuestRole { get; set; } = "";
+
+    /// <summary>Роль гостя или null, если гостевой вход выключен или задан неверно.</summary>
+    public UserRole? Guest => Enum.TryParse<UserRole>(GuestRole, ignoreCase: true, out var role)
+        && role is UserRole.Viewer or UserRole.Manager ? role : null;
 }
 
 public sealed record LoginRequest(string? Login, string? Password);
@@ -67,6 +78,8 @@ public static partial class AdminAuth
         services.AddOptions<AdminOptions>()
             .Bind(configuration.GetSection(AdminOptions.Section))
             .Validate(o => o.Password.Length >= 12, "Admin:Password должен быть не короче 12 символов")
+            .Validate(o => o.GuestRole.Length == 0 || o.Guest is not null,
+                "Admin:GuestRole — пусто (гостевой вход выключен), Viewer или Manager")
             .ValidateOnStart();
 
         services.AddHttpContextAccessor();
@@ -106,6 +119,9 @@ public static partial class AdminAuth
     {
         var group = app.MapGroup("/api/auth").WithTags("Вход");
         group.MapPost("/login", Login).RequireRateLimiting(LoginPolicy);
+        // гостевой вход без пароля: включён ли и с какими правами — чтобы страница входа показала кнопку
+        group.MapGet("/options", (IOptions<AdminOptions> options) => Results.Ok(new { guest = options.Value.Guest }));
+        group.MapPost("/guest", Guest).RequireRateLimiting(LoginPolicy);
         // приведение к Delegate: иначе метод с одним HttpContext считается RequestDelegate и результат теряется
         group.MapPost("/logout", (Delegate)Logout);
         // кто вошёл, его роль и отделы; demo — включён ли демо-режим (значок и тестовый стенд в интерфейсе)
@@ -142,6 +158,11 @@ public static partial class AdminAuth
         if (login == BuiltInAdmin.Login)
         {
             expected = AdminStamp(services.GetRequiredService<IOptions<AdminOptions>>().Value.Password);
+        }
+        else if (login == BuiltInAdmin.GuestLogin)
+        {
+            // гостевой вход выключили или сменили права — гостевые сессии больше не действуют
+            expected = services.GetRequiredService<IOptions<AdminOptions>>().Value.Guest is { } role ? GuestStamp(role) : null;
         }
         else
         {
@@ -202,6 +223,31 @@ public static partial class AdminAuth
         }
 
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+        return Results.NoContent();
+    }
+
+    private static string GuestStamp(UserRole role) => "guest-" + role;
+
+    /// <summary>Вход гостем: без пароля, с правами из настроек сервера (GUEST_ACCESS в .env), все отделы. Пишется в журнал.</summary>
+    private static async Task<IResult> Guest(HttpContext context, IOptions<AdminOptions> options, IBalancerDbContext db,
+        CancellationToken ct)
+    {
+        if (options.Value.Guest is not { } role)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Гостевой вход выключен");
+        }
+
+        db.AuditEntries.Add(new AuditEntry
+        {
+            Actor = BuiltInAdmin.GuestLogin,
+            Action = "login",
+            Entity = "session",
+            EntityId = context.Connection.RemoteIpAddress?.ToString() ?? "",
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync(ct);
+        await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(Identity(BuiltInAdmin.GuestLogin, "Гость", role, [], GuestStamp(role))));
         return Results.NoContent();
     }
 
