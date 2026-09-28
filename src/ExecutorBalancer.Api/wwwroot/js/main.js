@@ -1,7 +1,7 @@
 // Точка входа: вход, отдел, разделы и вкладки с учётом роли, периодическое обновление активной вкладки.
 import { api, onUnauthorized, problemText } from './api.js';
 import { $, el, icon } from './dom.js';
-import { setSession, session, can, demoAdmin, ROLE_TITLE } from './session.js';
+import { setSession, session, can, demoAdmin, demoManager, ROLE_TITLE } from './session.js';
 import { initUsers, refreshUsers } from './users.js';
 import { initOverview, refreshOverview, resetOverview, setOverviewDemo } from './overview.js';
 import { initAnalytics, refreshAnalytics, exportLink } from './analytics.js';
@@ -57,12 +57,12 @@ const GROUPS = {
   settings: [['constructor', 'Параметры и правила', 'adjustments', 'Viewer'], ['preview', 'Проверка заявки', 'zoom-check', 'Viewer'],
     ['motivation', 'Рейтинг и сверхнорма', 'trophy', 'Viewer'], ['departments', 'Отделы', 'building', 'Viewer'],
     ['users', 'Пользователи', 'shield-lock', 'Admin'], ['audit', 'Журнал', 'history', 'Manager']],
-  demo: [['demo', 'Тестовый стенд', 'player-play', 'Admin']],
+  demo: [['demo', 'Тестовый стенд', 'player-play', 'Manager']],
 };
 // страница сотрудника живёт в разделе «Работа», рядом со списком
 const groupOf = (tab) => (tab === 'profile' ? 'work' : Object.keys(GROUPS).find((g) => GROUPS[g].some(([t]) => t === tab)));
 const allowed = (tab) => tab === 'profile' || Object.values(GROUPS).flat()
-  .some(([t, , , role]) => t === tab && can(role) && (t !== 'demo' || demoAdmin()));
+  .some(([t, , , role]) => t === tab && can(role) && (t !== 'demo' || demoManager()));
 const lastInGroup = {};
 
 let active = 'start';
@@ -147,7 +147,7 @@ async function showGuestOption() {
   $('guest-text').textContent = guest === 'Manager' ? 'Войти как гость — можно пробовать' : 'Войти как гость — только просмотр';
   $('guest-hint').textContent = guest === 'Manager'
     ? 'Без пароля, с правами руководителя: мониторинг, аналитика, перерывы и увольнение сотрудников, «больше нормы», ИИ-разбор. '
-      + 'Параметры, правила, отделы, пользователи и тестовый стенд — только у администратора. Демо можно вернуть в исходное '
+      + 'На «Тестовом стенде» — поток заявок и заявка вручную. Параметры, правила, отделы и пользователи — только у администратора. Демо можно вернуть в исходное '
       + 'кнопкой в «Сотрудниках»; через 30 минут без изменений оно возвращается само.'
     : 'Без пароля, только просмотр: мониторинг, заявки, сотрудники, аналитика и настройки — изменить ничего нельзя.';
 }
@@ -167,9 +167,9 @@ async function showApp(me) {
   setExecutorsEditable(demoAdmin());
   setOverviewDemo(demoAdmin());
   setProfileEditable(demoAdmin());
-  setStartDemo(demoAdmin());
+  setStartDemo(demoManager());
   setDepartmentsDemo(demoAdmin());
-  $('tab-button-demo').classList.toggle('hidden', !demoAdmin());
+  $('tab-button-demo').classList.toggle('hidden', !demoManager());
   $('demo-badge').classList.toggle('hidden', !demo);
   for (const node of document.querySelectorAll('.demo-only')) node.classList.toggle('hidden', !demo);
   show(location.hash.slice(1));
