@@ -75,6 +75,15 @@ public sealed class AisStore
         }
     }
 
+    /// <summary>Уволен в балансировщике: АИС больше его не знает.</summary>
+    public bool RemoveExecutor(long id)
+    {
+        lock (_gate)
+        {
+            return _executors.Remove(id);
+        }
+    }
+
     public List<AisExecutor> Executors(string? department = null)
     {
         lock (_gate)

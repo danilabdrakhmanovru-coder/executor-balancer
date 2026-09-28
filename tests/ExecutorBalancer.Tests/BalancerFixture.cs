@@ -101,6 +101,12 @@ internal sealed class BalancerFixture : IAsyncDisposable
         return await action(scope.ServiceProvider.GetRequiredService<ExecutorBalancer.Application.Executors.ExecutorImportService>());
     }
 
+    public async Task<T> Staff<T>(Func<ExecutorBalancer.Application.Executors.StaffService, Task<T>> action)
+    {
+        await using var scope = _services.CreateAsyncScope();
+        return await action(scope.ServiceProvider.GetRequiredService<ExecutorBalancer.Application.Executors.StaffService>());
+    }
+
     public async Task<T> Departments<T>(Func<DepartmentService, Task<T>> action)
     {
         await using var scope = _services.CreateAsyncScope();

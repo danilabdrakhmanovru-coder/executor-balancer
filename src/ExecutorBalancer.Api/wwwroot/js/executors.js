@@ -48,13 +48,12 @@ function card(e, source) {
     actions.append(button(e.extraPercent > 0 ? `Больше нормы: +${e.extraPercent}%` : 'Больше нормы…', () => extraMode(e),
       e.extraPercent > 0 ? 'btn btn-sm btn-success' : 'btn btn-sm', 'flame'));
   }
-  if (demoEnabled && source) {
-    actions.append(
-      button(e.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(e, !e.isActive),
-        'btn btn-sm', e.isActive ? 'coffee' : 'user-check'),
-      button('Изменить', () => edit(source), 'btn btn-sm', 'pencil'),
-    );
+  if (can('Manager')) {
+    actions.append(button(e.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(e, !e.isActive),
+      'btn btn-sm', e.isActive ? 'coffee' : 'user-check'));
   }
+  if (demoEnabled && source) actions.append(button('Изменить', () => edit(source), 'btn btn-sm', 'pencil'));
+  if (can('Manager')) actions.append(button('Уволить', () => dismiss(e), 'btn btn-sm btn-outline-danger', 'trash'));
   if (actions.childElementCount) box.append(actions);
   return card;
 }
@@ -95,11 +94,26 @@ export async function extraMode(e, after = refreshExecutors) {
   }, after);
 }
 
+/**
+ * Перерыв и возвращение. Сервер не отпустит, если на работе останется меньше доли отдела из настроек
+ * или некому будет брать какой-то вид заявок, — тогда покажем почему.
+ */
 export async function setActive(e, active, after = refreshExecutors) {
   try {
-    await api(`/api/admin/demo/executors/${e.id}/active`, { method: 'POST', body: { isActive: active } });
+    await api(`/api/admin/executors/${e.id}/active`, { method: 'POST', body: { isActive: active } });
     toast(active ? `${e.fullName} вернулся — снова получает заявки`
       : `${e.fullName} ушёл — его открытые заявки перераспределяются между коллегами`);
+    setTimeout(after, 600);
+  } catch (err) { toast(problemText(err), 'bad'); }
+}
+
+/** Увольнение: открытые заявки уходят коллегам, сотрудник удаляется; история его назначений остаётся в отчётах. */
+export async function dismiss(e, after = refreshExecutors) {
+  if (!confirm(`Уволить ${e.fullName}? Его открытые заявки перейдут коллегам, сам он пропадёт из отдела. `
+    + 'История назначений останется в отчётах.')) return;
+  try {
+    await api(`/api/admin/executors/${e.id}`, { method: 'DELETE' });
+    toast(`${e.fullName} уволен — открытые заявки переданы коллегам`);
     setTimeout(after, 600);
   } catch (err) { toast(problemText(err), 'bad'); }
 }

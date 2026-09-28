@@ -5,6 +5,7 @@ using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
+using ExecutorBalancer.Application.Rules;
 using ExecutorBalancer.Domain;
 using ExecutorBalancer.Infrastructure.Workers;
 using Microsoft.EntityFrameworkCore;
@@ -69,9 +70,26 @@ public static class DemoEndpoints
             return stats.Error ?? Results.Ok(new { Simulation = simulation.Body, Ais = stats.Body });
         });
 
+        // сотрудники отдела в АИС; кого эмулятор не знает (он держит данные в памяти и после перезапуска пуст) —
+        // из балансировщика, чтобы их можно было править: правка заведёт их в АИС заново
         group.MapGet("/executors", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http, CancellationToken ct) =>
-            (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Get,
-                $"api/ais/executors?department={await CodeAsync(db, d, ct)}", null, ct)).Result);
+        {
+            var code = await CodeAsync(db, d, ct);
+            var inAis = await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Get,
+                $"api/ais/executors?department={code}", null, ct);
+            if (inAis.Error is not null)
+            {
+                return inAis.Error;
+            }
+
+            var list = inAis.Body is { ValueKind: JsonValueKind.Array } array ? array.EnumerateArray().ToList() : [];
+            var known = list.Select(x => x.GetProperty("id").GetInt64()).ToHashSet();
+            var missing = await db.Executors.AsNoTracking().Where(x => x.DepartmentId == d.Id).OrderBy(x => x.Id)
+                .ToListAsync(ct);
+            list.AddRange(missing.Where(x => !known.Contains(x.Id)).Select(x => JsonSerializer.SerializeToElement(
+                AisBody(code, x, x.IsActive), JsonSerializerOptions.Web)));
+            return Results.Ok(list.OrderBy(x => x.GetProperty("id").GetInt64()));
+        });
 
         group.MapPost("/executors/seed", async (DepartmentScope d, SeedRequest request, IBalancerDbContext db,
             IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
@@ -89,9 +107,9 @@ public static class DemoEndpoints
             IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
         {
             var errors = RequestValidation.Validate(request);
-            if (errors.Count == 0 && request.Attributes is not null)
+            if (errors.Count == 0)
             {
-                (await directory.GetAsync(d.Id, ct)).Catalog.Parse(FieldOwner.Executor, request.Attributes, errors);
+                await CheckSkillsAsync(d.Id, request, directory, errors, ct);
             }
 
             if (errors.Count > 0)
@@ -143,9 +161,9 @@ public static class DemoEndpoints
                 errors["id"] = ["должен быть положительным"];
             }
 
-            if (errors.Count == 0 && request.Attributes is not null)
+            if (errors.Count == 0)
             {
-                (await directory.GetAsync(d.Id, ct)).Catalog.Parse(FieldOwner.Executor, request.Attributes, errors);
+                await CheckSkillsAsync(d.Id, request, directory, errors, ct);
             }
 
             if (errors.Count > 0)
@@ -320,6 +338,65 @@ public static class DemoEndpoints
             Qualifications,
         };
         return await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
+    }
+
+    /// <summary>
+    /// Перерыв и увольнение решает балансировщик (<c>StaffService</c>), а эмулятор АИС получает то же, чтобы его данные
+    /// не расходились: иначе следующая правка из АИС вернула бы сотрудника. Эмулятор не знает сотрудника (перезапущен) —
+    /// заводится заново. Ошибки эмулятора не мешают: решение в балансировщике уже принято.
+    /// </summary>
+    /// <param name="isActive">Новое состояние; null — сотрудник уволен.</param>
+    internal static async Task MirrorStaffAsync(HttpClient client, IBalancerDbContext db, int departmentId, long id,
+        bool? isActive, CancellationToken ct)
+    {
+        if (client.BaseAddress is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (isActive is not { } active)
+            {
+                using var deleted = await client.DeleteAsync($"api/ais/executors/{id}", ct);
+                return;
+            }
+
+            using var response = await client.PostAsJsonAsync($"api/ais/executors/{id}/active", new ActiveRequest(active), ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound
+                && await db.Executors.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct) is { } executor)
+            {
+                var code = await CodeAsync(db, new DepartmentScope(departmentId), ct);
+                using var created = await client.PutAsJsonAsync($"api/ais/executors/{id}", AisBody(code, executor, active), ct);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            // эмулятор недоступен — решение уже в балансировщике
+        }
+    }
+
+    private static object AisBody(string code, Executor e, bool isActive) => new
+    {
+        e.Id,
+        Department = code,
+        e.FullName,
+        IsActive = isActive,
+        e.DailyLimit,
+        e.QualificationWeight,
+        Attributes = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(e.AttributesJson) ?? [],
+    };
+
+    /// <summary>Параметры по справочнику и хотя бы одна характеристика: без них сотрудник берёт любые заявки.</summary>
+    private static async Task CheckSkillsAsync(int departmentId, ExecutorRequest request, ExecutorDirectory directory,
+        Dictionary<string, string[]> errors, CancellationToken ct)
+    {
+        var catalog = (await directory.GetAsync(departmentId, ct)).Catalog;
+        var values = catalog.Parse(FieldOwner.Executor, request.Attributes ?? [], errors);
+        if (errors.Count == 0 && !catalog.HasExecutorSkills(values))
+        {
+            errors["attributes"] = [FieldCatalog.NoSkillsMessage];
+        }
     }
 
     /// <summary>Код отдела для АИС. Формат кода проверен при создании отдела — в адрес запроса он попадает как есть.</summary>

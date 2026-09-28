@@ -58,6 +58,24 @@ public sealed partial class FieldCatalog
         return values;
     }
 
+    /// <summary>Сообщение, когда у сотрудника не задано ни одной характеристики.</summary>
+    public const string NoSkillsMessage =
+        "нужна хотя бы одна характеристика (навык) — без них сотрудник подходит к любым заявкам";
+
+    /// <summary>
+    /// Есть ли у сотрудника хоть одна характеристика: без них правила его не ограничивают и он берёт любые заявки.
+    /// Если параметров сотрудника в отделе нет вовсе — требовать нечего.
+    /// </summary>
+    public bool HasExecutorSkills(IReadOnlyDictionary<string, FieldValue> values) =>
+        !_fields.Keys.Any(k => k.Owner == FieldOwner.Executor)
+        || values.Values.Any(v => v.Type switch
+        {
+            FieldType.Array => v.Items.Count > 0,
+            FieldType.Boolean => v.Flag,
+            FieldType.String or FieldType.Enum => v.Text.Length > 0,
+            _ => true,
+        });
+
     public IReadOnlyDictionary<string, FieldValue> ParseStored(FieldOwner owner, string json)
     {
         var raw = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? new Dictionary<string, JsonElement>();
