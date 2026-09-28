@@ -140,6 +140,17 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
         logger.LogInformation("Симуляция {Department} остановлена", department ?? "(основной)");
     }
 
+    /// <summary>Демо с чистого листа: поток отдела остановлен, счётчики и заявки в работе забыты.</summary>
+    public void Reset(string? department)
+    {
+        lock (_gate)
+        {
+            _flows.Remove(Key(department));
+        }
+
+        logger.LogInformation("Симуляция {Department} сброшена", department ?? "(основной)");
+    }
+
     public SimulationStatus Status(string? department)
     {
         lock (_gate)

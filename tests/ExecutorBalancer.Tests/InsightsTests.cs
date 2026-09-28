@@ -147,4 +147,10 @@ public class InsightsTests : IAsyncLifetime
         Assert.Null(Assert.Single(odd.Findings).Why);
         Assert.Equal(("да", "руководитель"), (Assert.Single(odd.Recommendations).Text, odd.Recommendations[0].Who));
     }
+
+    [Theory]
+    [InlineData("gpt://b1gabcdef/yandexgpt/latest", "YandexGPT Pro")]
+    [InlineData("gpt://b1gabcdef/yandexgpt-lite/latest", "YandexGPT Lite")]
+    [InlineData("qwen2.5:7b", "qwen2.5:7b")]
+    public void ModelTitleHidesFolderId(string model, string title) => Assert.Equal(title, AiAnalyst.Title(model));
 }

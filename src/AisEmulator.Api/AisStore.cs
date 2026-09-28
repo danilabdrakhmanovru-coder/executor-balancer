@@ -124,6 +124,21 @@ public sealed class AisStore
         }
     }
 
+    /// <summary>Демо с чистого листа: заявки отдела забыты. Номера не начинаются заново — они по-прежнему не повторяются.</summary>
+    public int RemoveOrders(string department)
+    {
+        lock (_gate)
+        {
+            var ids = _orders.Values.Where(o => (o.Department ?? NoDepartment) == department).Select(o => o.Id).ToList();
+            foreach (var id in ids)
+            {
+                _orders.Remove(id);
+            }
+
+            return ids.Count;
+        }
+    }
+
     public AisOrder? GetOrder(long id)
     {
         lock (_gate)

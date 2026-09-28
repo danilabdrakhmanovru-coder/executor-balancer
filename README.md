@@ -214,7 +214,21 @@ curl "$URL/departments/logistics/metrics?period=today" -H "X-Api-Key: $KEY"
 (`POST {адрес}/chat/completions`). Настройки — только в `.env` (он не попадает в git), после правки —
 `docker compose up -d`. Без этих строк всё работает, как раньше, кнопка «Разобрать с ИИ» неактивна.
 
-**Вариант 1 — своя модель на компьютере (бесплатно, данные никуда не уходят).** Установить Ollama
+**Вариант 1 — YandexGPT Pro в Yandex AI Studio (так подключено на нашем сервере; российское облако, оплата в рублях).** В консоли Yandex Cloud: создать каталог
+(его ID — `AI_PROJECT`), сервисный аккаунт с ролью `ai.languageModels.user` и **API-ключ** для него (область
+действия — только модели AI Studio). В `.env` (адрес и имя модели — по документации AI Studio, раздел
+«OpenAI-совместимый API»):
+
+```
+AI_BASE_URL=https://llm.api.cloud.yandex.net/v1
+AI_MODEL=gpt://<ID каталога>/yandexgpt/latest
+AI_PROJECT=<ID каталога>
+AI_API_KEY=<секретный ключ>
+```
+
+Пошагово для сервера — [docs/DEPLOY.md](docs/DEPLOY.md), раздел 8.
+
+**Вариант 2 — своя модель на компьютере, без облака (бесплатно, данные никуда не уходят; для запуска на ноутбуке).** Установить Ollama
 (`winget install Ollama.Ollama` или [ollama.com](https://ollama.com)), разрешить ей длинные запросы и скачать модель:
 
 ```powershell
@@ -233,18 +247,6 @@ AI_MAX_TOKENS=900
 ```
 
 Без видеокарты ответ идёт минуту-три, поэтому ожидание увеличено; `AI_MAX_TOKENS` ограничивает длину ответа.
-
-**Вариант 2 — Yandex AI Studio (российское облако, оплата в рублях).** В консоли Yandex Cloud: создать каталог
-(его ID — `AI_PROJECT`), сервисный аккаунт с ролью `ai.languageModels.user` и **API-ключ** для него (область
-действия — только модели AI Studio). В `.env` (адрес и имя модели — по документации AI Studio, раздел
-«OpenAI-совместимый API»):
-
-```
-AI_BASE_URL=https://llm.api.cloud.yandex.net/v1
-AI_MODEL=gpt://<ID каталога>/yandexgpt/latest
-AI_PROJECT=<ID каталога>
-AI_API_KEY=<секретный ключ>
-```
 
 **Вариант 3 — другой провайдер с OpenAI-совместимым API:** его адрес, имя модели и ключ в тех же строках.
 

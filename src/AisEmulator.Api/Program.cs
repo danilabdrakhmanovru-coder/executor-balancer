@@ -151,6 +151,18 @@ api.MapPost("/simulation/start", (SimulationRequest body, SimulationService simu
     return Results.Ok(simulation.Status(body.Department));
 });
 
+// сброс демо: поток отдела остановлен, его заявки забыты — балансировщик в это время удаляет их у себя
+api.MapPost("/simulation/reset", (string? department, SimulationService simulation, AisStore store) =>
+{
+    if (!AisCommands.IsValidDepartment(department))
+    {
+        return BadDepartment();
+    }
+
+    simulation.Reset(department);
+    return Results.Ok(new { Orders = store.RemoveOrders(department ?? AisStore.NoDepartment) });
+});
+
 api.MapPost("/simulation/stop", (string? department, SimulationService simulation) =>
 {
     if (!AisCommands.IsValidDepartment(department))

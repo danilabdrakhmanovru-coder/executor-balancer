@@ -201,6 +201,26 @@ public sealed class RedisLoadStore(IConnectionMultiplexer redis) : ILoadStore
     public Task BumpConfigVersionAsync(CancellationToken cancellationToken) =>
         Db.StringIncrementAsync(RedisKeys.ConfigVersion);
 
+    public async Task ForgetAsync(IReadOnlyCollection<long> executorIds, IReadOnlyCollection<long> orderIds, DateOnly day,
+        long hour, CancellationToken cancellationToken)
+    {
+        var db = Db;
+        if (executorIds.Count > 0)
+        {
+            var fields = executorIds.Select(id => (RedisValue)id).ToArray();
+            await Task.WhenAll(
+                db.HashDeleteAsync(RedisKeys.OpenWeight, fields),
+                db.HashDeleteAsync(RedisKeys.OpenCount, fields),
+                db.HashDeleteAsync(RedisKeys.Daily(day), fields),
+                db.HashDeleteAsync(RedisKeys.HourWeight(hour), fields));
+        }
+
+        foreach (var chunk in orderIds.Chunk(1000))
+        {
+            await db.KeyDeleteAsync(chunk.Select(RedisKeys.Order).ToArray());
+        }
+    }
+
     public async Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, long hour,
         CancellationToken cancellationToken)
     {

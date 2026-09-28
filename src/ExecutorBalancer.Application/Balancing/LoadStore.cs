@@ -17,6 +17,13 @@ public interface ILoadStore
 
     Task BumpConfigVersionAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Сброс демо: забыть заявки и обнулить нагрузку этих исполнителей (открытые, за сутки day и за час hour) —
+    /// как будто заявок не было. Остальные исполнители и отделы не затрагиваются.
+    /// </summary>
+    Task ForgetAsync(IReadOnlyCollection<long> executorIds, IReadOnlyCollection<long> orderIds, DateOnly day, long hour,
+        CancellationToken cancellationToken);
+
     /// <summary>Текущая нагрузка всех исполнителей — для дашборда. hour — номер часа (unix-время / 3600).</summary>
     Task<IReadOnlyDictionary<long, ExecutorLoad>> GetLoadsAsync(DateOnly day, long hour, CancellationToken cancellationToken);
 }
