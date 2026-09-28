@@ -5,7 +5,7 @@ import { $, el, row, badge, button, fmt, fmtDateTime, emptyRow, tile, icon } fro
 import { columns } from './charts.js';
 import { KIND } from './explain.js';
 import { openOrder, todayCell } from './overview.js';
-import { edit, extraMode, setActive } from './executors.js';
+import { dismiss, edit, extraMode, setActive } from './executors.js';
 import { can } from './session.js';
 
 const STATUS = { Processed: ['в работе', ''], Await: ['на доработке', 'warn'], Accept: ['решена', 'ok'], Reject: ['отклонена', 'ok'], Moved: ['передана другому', ''] };
@@ -41,11 +41,13 @@ function header(p, source) {
     actions.append(button(p.extraPercent > 0 ? `Больше нормы: +${p.extraPercent}%` : 'Больше нормы…', () => extraMode(p, after),
       p.extraPercent > 0 ? 'btn btn-success' : 'btn', 'flame'));
   }
-  if (demoEnabled && source) {
-    actions.append(
-      button(p.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(p, !p.isActive, after), 'btn', p.isActive ? 'coffee' : 'user-check'),
-      button('Изменить', () => edit(source, after), 'btn', 'pencil'),
-    );
+  if (can('Manager')) {
+    actions.append(button(p.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(p, !p.isActive, after), 'btn',
+      p.isActive ? 'coffee' : 'user-check'));
+  }
+  if (demoEnabled && source) actions.append(button('Изменить', () => edit(source, after), 'btn', 'pencil'));
+  if (can('Manager')) {
+    actions.append(button('Уволить', () => dismiss(p, () => { location.hash = '#executors'; }), 'btn btn-outline-danger', 'trash'));
   }
   body.append(avatar, who, actions);
   card.append(body);

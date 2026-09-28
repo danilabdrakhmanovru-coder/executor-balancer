@@ -7,6 +7,8 @@ using ExecutorBalancer.Application.Executors;
 using ExecutorBalancer.Application.Insights;
 using ExecutorBalancer.Application.Users;
 using ExecutorBalancer.Domain;
+using ExecutorBalancer.Infrastructure.Workers;
+using Microsoft.Extensions.Options;
 
 namespace ExecutorBalancer.Api.Endpoints;
 
@@ -109,6 +111,37 @@ public static class AdminEndpoints
             }
 
             return Results.Ok(apply == true ? await import.ApplyAsync(d.Id, file, ct) : await import.PreviewAsync(d.Id, file, ct));
+        }).RequireAuthorization(Policies.Manager);
+        // перерыв, возвращение и увольнение: проверка состава смены — в StaffService; в демо — то же в эмуляторе АИС
+        group.MapPost("/executors/{id:long}/active", async (DepartmentScope d, long id, ActiveRequest input, StaffService staff,
+            IOptions<DemoOptions> demo, IHttpClientFactory http, IBalancerDbContext db, CancellationToken ct) =>
+        {
+            if (await staff.SetActiveAsync(d.Id, id, input.IsActive, ct) is null)
+            {
+                return NotFound();
+            }
+
+            if (demo.Value.Enabled)
+            {
+                await DemoEndpoints.MirrorStaffAsync(http.CreateClient(AisOptions.HttpClientName), db, d.Id, id, input.IsActive, ct);
+            }
+
+            return Results.NoContent();
+        }).RequireAuthorization(Policies.Manager);
+        group.MapDelete("/executors/{id:long}", async (DepartmentScope d, long id, StaffService staff,
+            IOptions<DemoOptions> demo, IHttpClientFactory http, IBalancerDbContext db, CancellationToken ct) =>
+        {
+            if (!await staff.DismissAsync(d.Id, id, ct))
+            {
+                return NotFound();
+            }
+
+            if (demo.Value.Enabled)
+            {
+                await DemoEndpoints.MirrorStaffAsync(http.CreateClient(AisOptions.HttpClientName), db, d.Id, id, null, ct);
+            }
+
+            return Results.NoContent();
         }).RequireAuthorization(Policies.Manager);
         group.MapPut("/executors/{id:long}/extra", async (DepartmentScope d, long id, ExtraModeInput input,
                 ConfigurationService config, CancellationToken ct) =>

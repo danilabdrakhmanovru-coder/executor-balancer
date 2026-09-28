@@ -12,7 +12,8 @@ const ACTION = {
   department_created: ['Новый отдел', 'ok'], department_renamed: ['Отдел переименован', ''],
   department_deleted: ['Отдел удалён', 'bad'],
   motivation_updated: ['Мотивация изменена', 'warn'], extra_mode_changed: ['Больше нормы', ''],
-  executors_imported: ['Загрузка из файла', 'ok'],
+  executors_imported: ['Загрузка из файла', 'ok'], executor_break: ['Перерыв', ''], executor_back: ['Вернулся на работу', 'ok'],
+  executor_dismissed: ['Сотрудник уволен', 'bad'],
   user_created: ['Новый пользователь', 'ok'], user_updated: ['Пользователь изменён', 'warn'], user_deleted: ['Пользователь удалён', 'bad'],
 };
 const MOTIVATION = [
@@ -23,6 +24,7 @@ const MOTIVATION = [
   ['qualityThreshold', 'порог приостановки', (v) => `${Math.round(v * 100)}%`],
   ['heavyQualityThreshold', 'порог для сложных', (v) => `${Math.round(v * 100)}%`],
   ['heavyWeight', 'сложная — вес от', (v) => v],
+  ['minOnDutyPercent', 'минимум на работе', (v) => `${v}%`],
 ];
 const TYPE = { String: 'строка', Number: 'число', Boolean: 'да/нет', Enum: 'справочник', Array: 'список' };
 const OWNER = { Order: 'заявки', Executor: 'сотрудника' };
@@ -116,6 +118,9 @@ function describe(entry) {
     case 'motivation_updated':
       return `Настройки рейтинга и сверхнормы: ${changes(before, after, MOTIVATION.map(([key, label, show]) =>
         [key, label, (x) => show(x[key])]))}`;
+    case 'executor_break': return `${after.fullName} ушёл на перерыв — открытые заявки переданы коллегам`;
+    case 'executor_back': return `${after.fullName} вернулся на работу`;
+    case 'executor_dismissed': return `${after.fullName} уволен — открытые заявки переданы коллегам`;
     case 'extra_mode_changed': {
       const show = (p) => (p > 0 ? `+${p}% к норме` : 'выключен');
       return `${after.fullName}: режим «больше нормы» ${show(before.extraPercent)} → ${show(after.extraPercent)}`;

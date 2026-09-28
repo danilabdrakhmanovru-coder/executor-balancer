@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<ConfigurationService>();
         services.AddScoped<DepartmentService>();
         services.AddScoped<Executors.ExecutorImportService>();
+        services.AddScoped<Executors.StaffService>();
         services.AddScoped<AnalyticsService>();
         services.AddScoped<Insights.DemandAnalyzer>();
         services.AddScoped<Insights.AiAnalyst>();

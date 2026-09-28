@@ -87,7 +87,10 @@ public sealed record AuditView(long Id, string Actor, string Action, string Enti
 public sealed record PresetView(string Id, string Title, string Description, string[] OrderFields, string[] ExecutorFields,
     bool IsCurrent);
 
-/// <summary>Настройки мотивации отдела: рейтинг, режим «больше нормы», защита от работы на количество.</summary>
+/// <summary>
+/// Настройки мотивации отдела: рейтинг, режим «больше нормы», защита от работы на количество, а также сколько
+/// процентов сотрудников должно оставаться на работе (перерывы и увольнения из интерфейса).
+/// </summary>
 public sealed record MotivationInput(
     int FastCloseSeconds,
     decimal ReworkPenalty,
@@ -95,6 +98,7 @@ public sealed record MotivationInput(
     int MaxExtraPercent,
     decimal QualityThreshold,
     decimal HeavyQualityThreshold,
-    decimal HeavyWeight);
+    decimal HeavyWeight,
+    int MinOnDutyPercent = 30);
 
 public sealed record ExtraModeInput(int Percent);

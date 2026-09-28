@@ -45,4 +45,12 @@ public class Department
     public decimal HeavyQualityThreshold { get; set; } = 0.9m;
 
     public decimal HeavyWeight { get; set; } = 3m;
+
+    // ---------- состав смены ----------
+
+    /// <summary>
+    /// Сколько процентов сотрудников отдела должно оставаться на работе: отправить на перерыв или уволить сверх
+    /// этого из интерфейса нельзя. Кроме того, всегда остаётся кто-то для каждого вида заявок.
+    /// </summary>
+    public int MinOnDutyPercent { get; set; } = 30;
 }

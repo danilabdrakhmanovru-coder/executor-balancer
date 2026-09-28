@@ -129,6 +129,11 @@ public sealed class ConfigurationService(
             errors["heavyQualityThreshold"] = ["не ниже порога приостановки режима"];
         }
 
+        if (input.MinOnDutyPercent is < 0 or > 100)
+        {
+            errors["minOnDutyPercent"] = ["от 0 до 100 процентов"];
+        }
+
         if (input.HeavyWeight is < MinWeight or > MaxWeight)
         {
             errors["heavyWeight"] = [$"от {MinWeight} до {MaxWeight}"];
@@ -149,6 +154,7 @@ public sealed class ConfigurationService(
         department.QualityThreshold = input.QualityThreshold;
         department.HeavyQualityThreshold = input.HeavyQualityThreshold;
         department.HeavyWeight = input.HeavyWeight;
+        department.MinOnDutyPercent = input.MinOnDutyPercent;
         await SaveWithAuditAsync(departmentId, "motivation_updated", "department", () => departmentId, before,
             ToInput(department), cancellationToken);
         return ToInput(department);
@@ -191,7 +197,7 @@ public sealed class ConfigurationService(
     }
 
     private static MotivationInput ToInput(Department d) => new(d.FastCloseSeconds, d.ReworkPenalty, d.FastClosePenalty,
-        d.MaxExtraPercent, d.QualityThreshold, d.HeavyQualityThreshold, d.HeavyWeight);
+        d.MaxExtraPercent, d.QualityThreshold, d.HeavyQualityThreshold, d.HeavyWeight, d.MinOnDutyPercent);
 
     // ---------- шаблоны сфер ----------
 

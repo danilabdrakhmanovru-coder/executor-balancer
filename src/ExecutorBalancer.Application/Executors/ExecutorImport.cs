@@ -264,7 +264,12 @@ public sealed class ExecutorImportService(IBalancerDbContext db, ExecutorDirecto
             }
 
             var parseErrors = new Dictionary<string, string[]>();
-            snapshot.Catalog.Parse(FieldOwner.Executor, attributes, parseErrors);
+            if (!snapshot.Catalog.HasExecutorSkills(snapshot.Catalog.Parse(FieldOwner.Executor, attributes, parseErrors))
+                && parseErrors.Count == 0)
+            {
+                errors.Add(FieldCatalog.NoSkillsMessage);
+            }
+
             foreach (var (key, messages) in parseErrors)
             {
                 var label = fields.FirstOrDefault(f => $"attributes.{f.Key}" == key)?.Label ?? key;

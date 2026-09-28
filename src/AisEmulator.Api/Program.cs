@@ -85,6 +85,10 @@ api.MapPut("/executors/{id:long}", (long id, ExecutorBody body, AisCommands comm
 api.MapPost("/executors/{id:long}/active", (long id, ActiveBody body, AisCommands commands) =>
     commands.SetExecutorActive(id, body.IsActive) is { } executor ? Results.Ok(executor) : Results.NotFound());
 
+// сотрудник уволен в балансировщике — убрать из АИС, чтобы симуляция и правки его не вернули
+api.MapDelete("/executors/{id:long}", (long id, AisStore store) =>
+    store.RemoveExecutor(id) ? Results.NoContent() : Results.NotFound());
+
 // --- заявки ---
 api.MapGet("/orders", (string? status, bool? assigned, int? limit, string? department, AisStore store) =>
     AisCommands.IsValidDepartment(department)
