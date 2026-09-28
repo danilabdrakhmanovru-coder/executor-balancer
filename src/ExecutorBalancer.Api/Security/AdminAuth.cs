@@ -4,10 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using ExecutorBalancer.Application;
+using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Application.Users;
 using ExecutorBalancer.Domain;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
@@ -163,6 +165,25 @@ public static partial class AdminAuth
         {
             // гостевой вход выключили или сменили права — гостевые сессии больше не действуют
             expected = services.GetRequiredService<IOptions<AdminOptions>>().Value.Guest is { } role ? GuestStamp(role) : null;
+            // песочница гостя: удалена (гость долго отсутствовал) — сессия тоже заканчивается; жива — отмечаем, что гость здесь
+            if (expected is not null && SandboxOf(context.Principal!) is { } sandbox)
+            {
+                var cache = services.GetRequiredService<IMemoryCache>();
+                var exists = await cache.GetOrCreateAsync("guest-sandbox:" + sandbox, entry =>
+                {
+                    entry.AbsoluteExpirationRelativeToNow = StampCheck;
+                    return services.GetRequiredService<IBalancerDbContext>().Departments
+                        .AnyAsync(d => d.Id == sandbox && d.IsGuest, context.HttpContext.RequestAborted);
+                });
+                if (exists)
+                {
+                    services.GetRequiredService<Endpoints.GuestActivity>().Touch(sandbox, DateTimeOffset.UtcNow);
+                }
+                else
+                {
+                    expected = null;
+                }
+            }
         }
         else
         {
@@ -228,13 +249,35 @@ public static partial class AdminAuth
 
     private static string GuestStamp(UserRole role) => "guest-" + role;
 
-    /// <summary>Вход гостем: без пароля, с правами из настроек сервера (GUEST_ACCESS в .env), все отделы. Пишется в журнал.</summary>
-    private static async Task<IResult> Guest(HttpContext context, IOptions<AdminOptions> options, IBalancerDbContext db,
-        CancellationToken ct)
+    /// <summary>Песочница гостя — единственный отдел в его сессии; у наблюдателя-гостя её нет (видит все отделы).</summary>
+    private static int? SandboxOf(ClaimsPrincipal user) =>
+        user.Identity?.Name == BuiltInAdmin.GuestLogin && user.Access().Departments is { Count: 1 } departments
+            ? departments.First()
+            : null;
+
+    /// <summary>
+    /// Вход гостем: без пароля, с правами из настроек сервера (GUEST_ACCESS в .env). Наблюдатель смотрит все отделы;
+    /// руководитель в демо-режиме получает свою песочницу — отдел, который видит только он. Пишется в журнал.
+    /// </summary>
+    private static async Task<IResult> Guest(HttpContext context, IOptions<AdminOptions> options,
+        IOptions<Endpoints.DemoOptions> demo, IBalancerDbContext db, CancellationToken ct)
     {
         if (options.Value.Guest is not { } role)
         {
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Гостевой вход выключен");
+        }
+
+        int[] departments = [];
+        if (role == UserRole.Manager && demo.Value.Enabled)
+        {
+            try
+            {
+                departments = [await Endpoints.GuestSandbox.CreateAsync(context.RequestServices, ct)];
+            }
+            catch (ConfigurationConflictException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: ex.Message);
+            }
         }
 
         db.AuditEntries.Add(new AuditEntry
@@ -247,7 +290,7 @@ public static partial class AdminAuth
         });
         await db.SaveChangesAsync(ct);
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(Identity(BuiltInAdmin.GuestLogin, "Гость", role, [], GuestStamp(role))));
+            new ClaimsPrincipal(Identity(BuiltInAdmin.GuestLogin, "Гость", role, departments, GuestStamp(role))));
         return Results.NoContent();
     }
 
@@ -266,6 +309,12 @@ public static partial class AdminAuth
 
     private static async Task<IResult> Logout(HttpContext context)
     {
+        // гость ушёл — его песочница больше не нужна
+        if (SandboxOf(context.User) is { } sandbox)
+        {
+            await Endpoints.GuestSandbox.DeleteAsync(context.RequestServices, sandbox, context.RequestAborted);
+        }
+
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Results.NoContent();
     }

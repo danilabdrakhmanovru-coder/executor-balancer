@@ -59,7 +59,7 @@ public sealed class DemoWarmup(IServiceScopeFactory scopes, IOptions<DemoOptions
         var directory = scope.ServiceProvider.GetRequiredService<ExecutorDirectory>();
         var client = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>().CreateClient(AisOptions.HttpClientName);
         var empty = await db.Departments.AsNoTracking()
-            .Where(d => !db.Executors.Any(e => e.DepartmentId == d.Id))
+            .Where(d => !d.IsGuest && !db.Executors.Any(e => e.DepartmentId == d.Id))
             .OrderBy(d => d.Id).Select(d => new { d.Id, d.Name })
             .ToListAsync(ct);
         foreach (var department in empty)

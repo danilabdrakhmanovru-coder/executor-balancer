@@ -11,8 +11,9 @@ namespace ExecutorBalancer.Application.Configuration;
 /// <param name="Sphere">Своя сфера из мастера — вместо шаблона.</param>
 public sealed record DepartmentInput(string? Name, string? Code, string? PresetId, SphereInput? Sphere = null);
 
+/// <param name="IsGuest">Песочница гостя — удаляется сама, когда гость уходит.</param>
 public sealed record DepartmentView(int Id, string Code, string Name, string? PresetId, string? PresetTitle,
-    int Executors, int ActiveExecutors, int OpenOrders, DateTimeOffset CreatedAt);
+    int Executors, int ActiveExecutors, int OpenOrders, DateTimeOffset CreatedAt, bool IsGuest = false);
 
 /// <summary>
 /// Отделы — независимые пространства: у каждого свои параметры, правила, исполнители, заявки и отчёты.
@@ -22,6 +23,7 @@ public sealed partial class DepartmentService(
     IBalancerDbContext db,
     ILoadStore loadStore,
     ExecutorDirectory directory,
+    OrderBalancer balancer,
     TimeProvider clock,
     ILogger<DepartmentService> logger,
     Users.ICurrentActor actor)
@@ -56,7 +58,7 @@ public sealed partial class DepartmentService(
         {
             executors.TryGetValue(d.Id, out var e);
             return new DepartmentView(d.Id, d.Code, d.Name, d.PresetId, DomainPresets.Find(d.PresetId)?.Title ?? d.SphereTitle,
-                e?.Total ?? 0, e?.Active ?? 0, open.GetValueOrDefault(d.Id), d.CreatedAt);
+                e?.Total ?? 0, e?.Active ?? 0, open.GetValueOrDefault(d.Id), d.CreatedAt, d.IsGuest);
         }).ToList();
     }
 
@@ -92,8 +94,9 @@ public sealed partial class DepartmentService(
 
         ThrowIfAny(errors);
 
-        var existing = await db.Departments.AsNoTracking().Select(d => new { d.Code, d.Name }).ToListAsync(cancellationToken);
-        if (existing.Count >= MaxDepartments)
+        var existing = await db.Departments.AsNoTracking().Select(d => new { d.Code, d.Name, d.IsGuest }).ToListAsync(cancellationToken);
+        // песочницы гостей — отдельный предел (см. CreateGuestAsync)
+        if (existing.Count(d => !d.IsGuest) >= MaxDepartments)
         {
             throw new ConfigurationConflictException($"отделов не больше {MaxDepartments}");
         }
@@ -233,6 +236,90 @@ public sealed partial class DepartmentService(
         await ChangedAsync(cancellationToken);
         logger.LogInformation("Удалён отдел «{Name}»", department.Name);
         return true;
+    }
+
+    /// <summary>
+    /// Песочница гостя: отдел по шаблону сферы с кодом guest-…, виден только этому гостю. Не больше maxGuests сразу —
+    /// иначе <see cref="ConfigurationConflictException"/>. Событие пишется в журнал самой песочницы, а не в общий:
+    /// гости не видят друг друга.
+    /// </summary>
+    public async Task<Department> CreateGuestAsync(DomainPreset preset, int maxGuests, CancellationToken cancellationToken)
+    {
+        if (await db.Departments.CountAsync(d => d.IsGuest, cancellationToken) >= maxGuests)
+        {
+            throw new ConfigurationConflictException("Сейчас на сайте много гостей — попробуйте войти через несколько минут");
+        }
+
+        var now = clock.GetUtcNow();
+        var tag = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(3)).ToLowerInvariant();
+        var department = new Department
+        {
+            Code = "guest-" + tag, Name = $"Гостевой отдел {tag.ToUpperInvariant()}", PresetId = preset.Id, CreatedAt = now,
+            IsGuest = true,
+        };
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            db.Departments.Add(department);
+            await db.SaveChangesAsync(cancellationToken);
+            var (fields, rules, weightRules) = DomainPresets.Build(preset, now, department.Id);
+            db.FieldDefinitions.AddRange(fields);
+            db.Rules.AddRange(rules);
+            db.WeightRules.AddRange(weightRules);
+            db.AuditEntries.Add(new AuditEntry
+            {
+                DepartmentId = department.Id,
+                Actor = actor.Name,
+                Action = "guest_sandbox_created",
+                Entity = "department",
+                EntityId = department.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                DataJson = JsonSerializer.Serialize(new { after = Snapshot(department) }, AuditJson),
+                CreatedAt = now,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await ChangedAsync(cancellationToken);
+        logger.LogInformation("Создана песочница гостя «{Name}»", department.Name);
+        return department;
+    }
+
+    /// <summary>
+    /// Удаляет песочницу гостя целиком: заявки, статистику, сотрудников, настройки и её журнал. Возвращает сотрудников,
+    /// которых надо убрать и из АИС; null — такой песочницы нет (обычные отделы так не удаляются).
+    /// </summary>
+    public async Task<IReadOnlyList<long>?> DeleteGuestAsync(int id, CancellationToken cancellationToken)
+    {
+        if (!await db.Departments.AnyAsync(d => d.Id == id && d.IsGuest, cancellationToken))
+        {
+            return null;
+        }
+
+        var executors = await db.Executors.AsNoTracking().Where(e => e.DepartmentId == id).Select(e => e.Id)
+            .ToListAsync(cancellationToken);
+        var orders = await Executors.DepartmentData.WipeOrdersAsync(db, id, cancellationToken);
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            await db.ExecutorQualifications.Where(q => executors.Contains(q.ExecutorId)).ExecuteDeleteAsync(cancellationToken);
+            await db.Executors.Where(e => e.DepartmentId == id).ExecuteDeleteAsync(cancellationToken);
+            await db.Rules.Where(r => r.DepartmentId == id).ExecuteDeleteAsync(cancellationToken);
+            await db.WeightRules.Where(r => r.DepartmentId == id).ExecuteDeleteAsync(cancellationToken);
+            await db.FieldDefinitions.Where(f => f.DepartmentId == id).ExecuteDeleteAsync(cancellationToken);
+            await db.AuditEntries.Where(a => a.DepartmentId == id).ExecuteDeleteAsync(cancellationToken);
+            await db.Departments.Where(d => d.Id == id).ExecuteDeleteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await loadStore.ForgetAsync(executors, orders, balancer.Today(), balancer.CurrentHour(), cancellationToken);
+        foreach (var executor in executors)
+        {
+            await loadStore.SetActiveAsync(executor, false, cancellationToken);
+        }
+
+        await ChangedAsync(cancellationToken);
+        logger.LogInformation("Удалена песочница гостя {Id}: заявок {Orders}, сотрудников {Executors}", id, orders.Count,
+            executors.Count);
+        return executors;
     }
 
     private void Audit(string action, int id, object? before, object? after) =>

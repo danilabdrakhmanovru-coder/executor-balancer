@@ -38,7 +38,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // после миграций и восстановления Redis (StartupInitializer): в демо заполняет пустые отделы, в бою сразу завершается
 builder.Services.AddHostedService<DemoWarmup>();
 // гостевой вход в демо: полчаса без изменений от гостей — демо возвращается в исходное
-builder.Services.AddHostedService<DemoAutoReset>();
+builder.Services.AddSingleton<GuestActivity>();
+builder.Services.AddHostedService<GuestSandboxCleanup>();
 
 var app = builder.Build();
 
