@@ -39,8 +39,9 @@ public readonly record struct DepartmentScope(int Id)
             if (argument is DepartmentScope scope)
             {
                 var departments = context.HttpContext.RequestServices.GetRequiredService<DepartmentService>();
-                if (!context.HttpContext.User.Access().CanSee(scope.Id)
-                    || !await departments.ExistsAsync(scope.Id, context.HttpContext.RequestAborted))
+                var access = context.HttpContext.User.Access();
+                if (!access.CanSee(scope.Id)
+                    || !await departments.ExistsAsync(scope.Id, context.HttpContext.RequestAborted, access.SeesGuestSandboxes))
                 {
                     return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Отдел не найден");
                 }

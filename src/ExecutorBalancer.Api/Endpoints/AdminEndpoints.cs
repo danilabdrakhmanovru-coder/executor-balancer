@@ -152,7 +152,8 @@ public static class AdminEndpoints
         group.MapGet("/departments", async (HttpContext http, DepartmentService departments, CancellationToken ct) =>
         {
             var access = http.User.Access();
-            return (await departments.ListAsync(ct)).Where(d => access.CanSee(d.Id)).ToList();
+            return (await departments.ListAsync(ct))
+                .Where(d => access.CanSee(d.Id) && (!d.IsGuest || access.SeesGuestSandboxes)).ToList();
         });
         group.MapPost("/departments", async (DepartmentInput input, DepartmentService departments, CancellationToken ct) =>
             Results.Ok(await departments.CreateAsync(input, ct))).RequireAuthorization(Policies.Admin);

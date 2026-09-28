@@ -103,19 +103,19 @@ export async function extraMode(e, after = refreshExecutors) {
 export async function setActive(e, active, after = refreshExecutors) {
   try {
     await api(`/api/admin/executors/${e.id}/active`, { method: 'POST', body: { isActive: active } });
-    toast(active ? `${e.fullName} вернулся — снова получает заявки`
-      : `${e.fullName} ушёл — его открытые заявки перераспределяются между коллегами`);
+    toast(active ? `${e.fullName} — снова на работе и получает заявки`
+      : `${e.fullName} — на перерыве, открытые заявки перераспределяются между коллегами`);
     setTimeout(after, 600);
   } catch (err) { toast(problemText(err), 'bad'); }
 }
 
 /** Увольнение: открытые заявки уходят коллегам, сотрудник удаляется; история его назначений остаётся в отчётах. */
 export async function dismiss(e, after = refreshExecutors) {
-  if (!confirm(`Уволить ${e.fullName}? Его открытые заявки перейдут коллегам, сам он пропадёт из отдела. `
+  if (!confirm(`Уволить сотрудника «${e.fullName}»? Открытые заявки перейдут коллегам, сотрудник пропадёт из отдела. `
     + 'История назначений останется в отчётах.')) return;
   try {
     await api(`/api/admin/executors/${e.id}`, { method: 'DELETE' });
-    toast(`${e.fullName} уволен — открытые заявки переданы коллегам`);
+    toast(`${e.fullName} — увольнение, открытые заявки переданы коллегам`);
     setTimeout(after, 600);
   } catch (err) { toast(problemText(err), 'bad'); }
 }

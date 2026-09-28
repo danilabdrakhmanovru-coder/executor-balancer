@@ -409,7 +409,7 @@ public sealed class OrderBalancer(
             explanation.ChosenScore = explanation.Candidates.First(c => c.ExecutorId == winner.Id).Score;
             explanation.Decision = overNorm
                 ? $"{winner.FullName}: у всех подходящих норма на сегодня набрана, заявку берёт сверх нормы (режим «больше нормы»)"
-                : $"{winner.FullName}: меньше всех получил за этот час среди подходящих (оценка {explanation.ChosenScore})";
+                : $"{winner.FullName}: меньше всех нагрузки за этот час среди подходящих (оценка {explanation.ChosenScore})";
         }
         else if (explanation.ChosenExecutorId is null)
         {
@@ -457,7 +457,7 @@ public sealed class OrderBalancer(
         var withinLimit = true;
         if (executor.DailyLimit is not { } norm)
         {
-            limit = $"суточного лимита нет — сегодня получил {load.AssignedToday}";
+            limit = $"суточного лимита нет — сегодня назначено {load.AssignedToday}";
         }
         else if (load.AssignedToday < norm)
         {
@@ -593,7 +593,7 @@ public sealed class OrderBalancer(
             AssignmentKind.Secondary => $"{chosen.FullName} уже работал с этой заявкой",
             AssignmentKind.Extra =>
                 $"{chosen.FullName}: у всех подходящих норма на сегодня набрана, заявку берёт сверх нормы (режим «больше нормы»)",
-            _ => $"{chosen.FullName}: меньше всех получил за этот час среди подходящих (оценка {explanation.ChosenScore})",
+            _ => $"{chosen.FullName}: меньше всех нагрузки за этот час среди подходящих (оценка {explanation.ChosenScore})",
         };
         MarkChosen(explanation, executorId);
 

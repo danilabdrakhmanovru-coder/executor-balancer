@@ -62,8 +62,9 @@ public sealed partial class DepartmentService(
         }).ToList();
     }
 
-    public Task<bool> ExistsAsync(int id, CancellationToken cancellationToken) =>
-        db.Departments.AsNoTracking().AnyAsync(d => d.Id == id, cancellationToken);
+    /// <param name="withGuests">Видны ли песочницы гостей: администратору и самому гостю — да, остальным — нет.</param>
+    public Task<bool> ExistsAsync(int id, CancellationToken cancellationToken, bool withGuests = true) =>
+        db.Departments.AsNoTracking().AnyAsync(d => d.Id == id && (withGuests || !d.IsGuest), cancellationToken);
 
     public async Task<int?> FindByCodeAsync(string code, CancellationToken cancellationToken) =>
         IsValidCode(code)

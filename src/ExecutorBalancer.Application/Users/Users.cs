@@ -37,6 +37,12 @@ public sealed record AccessScope(string Login, UserRole Role, IReadOnlyCollectio
     public bool AtLeast(UserRole role) => Role >= role;
 
     public bool CanSee(int departmentId) => Role == UserRole.Admin || Departments is null || Departments.Contains(departmentId);
+
+    /// <summary>
+    /// Песочницы гостей видят администратор и сам гость (у него в списке только его песочница). Пользователь «все отделы»
+    /// их не видит: это чужие демонстрации, а не отделы компании.
+    /// </summary>
+    public bool SeesGuestSandboxes => Role == UserRole.Admin || Departments is not null;
 }
 
 /// <summary>PBKDF2-SHA256 с солью: формат «pbkdf2-sha256$итерации$соль$хеш» (Base64).</summary>
