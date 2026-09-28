@@ -14,6 +14,7 @@ const ACTION = {
   motivation_updated: ['Мотивация изменена', 'warn'], extra_mode_changed: ['Больше нормы', ''],
   executors_imported: ['Загрузка из файла', 'ok'], executor_break: ['Перерыв', ''], executor_back: ['Вернулся на работу', 'ok'],
   executor_dismissed: ['Сотрудник уволен', 'bad'],
+  demo_reset: ['Демо в исходном', 'ok'],
   user_created: ['Новый пользователь', 'ok'], user_updated: ['Пользователь изменён', 'warn'], user_deleted: ['Пользователь удалён', 'bad'],
 };
 const MOTIVATION = [
@@ -120,6 +121,8 @@ function describe(entry) {
         [key, label, (x) => show(x[key])]))}`;
     case 'executor_break': return `${after.fullName} ушёл на перерыв — открытые заявки переданы коллегам`;
     case 'executor_back': return `${after.fullName} вернулся на работу`;
+    case 'demo_reset': return `Демо возвращено в исходное${after.automatic ? ' автоматически после гостей' : ''}: `
+      + `на работу вернулись ${after.back ?? 0}, «больше нормы» выключено у ${after.extra ?? 0}, заведено заново ${after.missing ?? 0}`;
     case 'executor_dismissed': return `${after.fullName} уволен — открытые заявки переданы коллегам`;
     case 'extra_mode_changed': {
       const show = (p) => (p > 0 ? `+${p}% к норме` : 'выключен');

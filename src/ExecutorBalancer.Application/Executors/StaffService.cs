@@ -9,6 +9,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ExecutorBalancer.Application.Executors;
 
+/// <param name="Back">Кто вернулся на работу.</param>
+/// <param name="ExtraCleared">У скольких выключен режим «больше нормы».</param>
+/// <param name="Missing">Скольких не хватает до численности, заведённой администратором.</param>
+public sealed record DemoResetResult(IReadOnlyList<long> Back, int ExtraCleared, int Missing);
+
 /// <summary>
 /// Состав отдела из интерфейса: перерыв, возвращение на работу, увольнение. Уйти может не всякий: на работе должна
 /// остаться доля отдела (<see cref="Department.MinOnDutyPercent"/>) и хотя бы один сотрудник, способный взять каждый
@@ -79,6 +84,50 @@ public sealed class StaffService(
         directory.Invalidate();
         await AuditAsync(departmentId, "executor_dismissed", executor, cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Демо после гостей: все сотрудники отдела — на работу, режим «больше нормы» выключен. Возвращает, кто вернулся
+    /// на работу и скольких не хватает до численности, заведённой администратором (их заводит пульт через АИС).
+    /// Заявки и статистика не трогаются. null — отдела нет.
+    /// </summary>
+    public async Task<DemoResetResult?> ResetDemoAsync(int departmentId, bool automatic, CancellationToken cancellationToken)
+    {
+        var department = await db.Departments.AsNoTracking().FirstOrDefaultAsync(d => d.Id == departmentId, cancellationToken);
+        if (department is null)
+        {
+            return null;
+        }
+
+        var staff = await db.Executors.AsNoTracking().Where(e => e.DepartmentId == departmentId).ToListAsync(cancellationToken);
+        var back = staff.Where(e => !e.IsActive).ToList();
+        foreach (var executor in back)
+        {
+            await balancer.UpsertExecutorAsync(departmentId, Incoming(executor, true), cancellationToken);
+        }
+
+        var extra = await db.Executors.Where(e => e.DepartmentId == departmentId && e.ExtraPercent > 0)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.ExtraPercent, 0), cancellationToken);
+        await loadStore.BumpConfigVersionAsync(cancellationToken);
+        directory.Invalidate();
+
+        var missing = Math.Max(0, (department.DemoStaffCount ?? staff.Count) - staff.Count);
+        if (back.Count > 0 || extra > 0 || missing > 0)
+        {
+            db.AuditEntries.Add(new AuditEntry
+            {
+                DepartmentId = departmentId,
+                Actor = actor.Name,
+                Action = "demo_reset",
+                Entity = "department",
+                EntityId = departmentId.ToString(CultureInfo.InvariantCulture),
+                DataJson = JsonSerializer.Serialize(new { after = new { back = back.Count, extra, missing, automatic } }, AuditJson),
+                CreatedAt = clock.GetUtcNow(),
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return new DemoResetResult(back.Select(e => e.Id).ToList(), extra, missing);
     }
 
     /// <summary>

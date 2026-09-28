@@ -6,7 +6,7 @@ import { attributeForm } from './forms.js';
 import { openEditor } from './editor.js';
 import { todayCell } from './overview.js';
 import { openImport } from './import.js';
-import { can } from './session.js';
+import { can, session } from './session.js';
 
 let demoEnabled = false;
 let thresholds = { qualityThreshold: 0.8, heavyQualityThreshold: 0.9 };
@@ -14,6 +14,8 @@ let thresholds = { qualityThreshold: 0.8, heavyQualityThreshold: 0.9 };
 export function setExecutorsEditable(enabled) {
   demoEnabled = enabled;
   $('executor-add').classList.toggle('hidden', !enabled);
+  // сброс демо — и руководителю, и гостю: нужен только демо-режим
+  $('demo-reset').classList.toggle('hidden', !session().demo);
 }
 
 function card(e, source) {
@@ -176,7 +178,22 @@ async function create() {
   }, () => new Promise((r) => setTimeout(r, 500)).then(refreshExecutors));
 }
 
+/** Демо после гостей: все на работу, «больше нормы» выключен, уволенные восполняются. Заявки и статистика остаются. */
+async function resetDemo() {
+  if (!confirm('Вернуть демо в исходное? Все сотрудники вернутся на работу, режим «больше нормы» выключится, уволенные '
+    + 'будут восполнены до заведённой численности — во всех отделах, которые вам видны. Заявки и статистика останутся.')) return;
+  const button = $('demo-reset');
+  button.disabled = true;
+  try {
+    const r = await api('/api/admin/demo-reset', { method: 'POST' });
+    toast(r.back || r.added ? `Демо в исходном: вернулись на работу ${r.back}, заведено заново ${r.added}`
+      : 'Демо уже в исходном состоянии');
+    setTimeout(refreshExecutors, 800);
+  } catch (e) { toast(problemText(e), 'bad'); } finally { button.disabled = false; }
+}
+
 export function initExecutors() {
+  $('demo-reset').addEventListener('click', resetDemo);
   $('executor-add').addEventListener('click', () => { create().catch((e) => toast(problemText(e), 'bad')); });
   $('executor-import').addEventListener('click', () => openImport(refreshExecutors));
 }

@@ -99,4 +99,29 @@ public class StaffTests : IAsyncLifetime
         Assert.StartsWith("не заполнено: Тематики —", error, StringComparison.Ordinal);
         Assert.Empty(preview.Rows[1].Errors);
     }
+
+    [Fact]
+    public async Task DemoResetBringsEveryoneBack()
+    {
+        await SetMinOnDuty(0);
+        for (var id = 1; id <= 4; id++)
+        {
+            await _f.AddExecutor(id, dailyLimit: 50);
+        }
+
+        await _f.Query(db => db.Departments.Where(d => d.Id == D)
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.DemoStaffCount, 4)));
+        await Break(1);
+        await _f.Config(c => c.SetExtraModeAsync(D, 2, new ExtraModeInput(20), CancellationToken.None));
+        await _f.Staff(s => s.DismissAsync(D, 3, CancellationToken.None));
+
+        var result = await _f.Staff(s => s.ResetDemoAsync(D, automatic: false, CancellationToken.None));
+
+        Assert.Equal([1L], result!.Back);
+        Assert.Equal((1, 1), (result.ExtraCleared, result.Missing)); // уволенного заводит пульт через АИС
+        var staff = await _f.Query(db => db.Executors.AsNoTracking().Where(e => e.DepartmentId == D).ToListAsync());
+        Assert.All(staff, e => Assert.True(e.IsActive));
+        Assert.All(staff, e => Assert.Equal(0, e.ExtraPercent));
+        Assert.True(await _f.Query(db => db.AuditEntries.AnyAsync(a => a.Action == "demo_reset")));
+    }
 }

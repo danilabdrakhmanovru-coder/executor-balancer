@@ -44,6 +44,8 @@ services:
       Admin__Password: ${ADMIN_PASSWORD:?задайте ADMIN_PASSWORD в .env}
       # гостевой вход без пароля (кнопка на странице входа): пусто — выключен, Viewer — просмотр, Manager — руководитель
       Admin__GuestRole: ${GUEST_ACCESS:-}
+      # через сколько минут без изменений от гостей демо само возвращается в исходное (0 — не возвращать)
+      Demo__GuestResetMinutes: ${GUEST_RESET_MINUTES:-30}
       # адрес АИС, куда уходят назначения: в бою — настоящая АИС, на демонстрации — эмулятор
       Ais__BaseUrl: ${AIS_BASE_URL:-http://ais:8080}
       Ais__ApiKey: ${AIS_API_KEY:?задайте AIS_API_KEY в .env}

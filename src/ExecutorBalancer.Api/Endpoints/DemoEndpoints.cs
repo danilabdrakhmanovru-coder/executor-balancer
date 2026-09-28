@@ -20,6 +20,9 @@ public sealed class DemoOptions
 
     /// <summary>Пульт демонстрации: управление эмулятором АИС из интерфейса. В боевом окружении выключен.</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>Через сколько минут без изменений от гостей демо само возвращается в исходное (0 — не возвращать).</summary>
+    public int GuestResetMinutes { get; set; } = 30;
 }
 
 /// <param name="Mode">
@@ -59,6 +62,21 @@ public static class DemoEndpoints
                     ? await next(context)
                     : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"))
             .AddEndpointFilter(DepartmentScope.RequireDepartment);
+
+        // «Вернуть демо в исходное» — и руководителю, и гостю с правами руководителя: после гостей всё приводится в порядок
+        app.MapPost("/api/admin/demo-reset", async (HttpContext http, CancellationToken ct) =>
+            {
+                var access = http.User.Access();
+                var (back, added) = await ResetDemoAsync(http.RequestServices, access.CanSee, automatic: false, ct);
+                return Results.Ok(new { Back = back, Added = added });
+            })
+            .WithTags("Демонстрация")
+            .RequireAuthorization(Policies.Manager)
+            .AddEndpointFilter<CsrfHeaderFilter>()
+            .AddEndpointFilter(async (context, next) =>
+                context.HttpContext.RequestServices.GetRequiredService<IOptions<DemoOptions>>().Value.Enabled
+                    ? await next(context)
+                    : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Пульт демонстрации выключен"));
 
         group.MapGet("/status", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http, CancellationToken ct) =>
         {
@@ -111,6 +129,7 @@ public static class DemoEndpoints
                 case "add":
                     return await GrowAsync(d.Id, request.Count, db, client, directory, ct);
                 case "exact":
+                    await RememberStaffAsync(db, d.Id, request.Count, ct);
                     var staffNow = await db.Executors.AsNoTracking().Where(x => x.DepartmentId == d.Id)
                         .Select(x => new { x.Id, x.IsActive }).ToListAsync(ct);
                     if (staffNow.Count < request.Count)
@@ -368,7 +387,54 @@ public static class DemoEndpoints
             DailyLimits = await DailyLimitsAsync(db, departmentId, ct),
             Qualifications,
         };
-        return await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
+        var seeded = await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
+        if (seeded.Error is null)
+        {
+            await RememberStaffAsync(db, departmentId, count, ct);
+        }
+
+        return seeded;
+    }
+
+    /// <summary>Численность, заведённая администратором, — до неё «Вернуть демо в исходное» восстанавливает отдел.</summary>
+    private static Task<int> RememberStaffAsync(IBalancerDbContext db, int departmentId, int count, CancellationToken ct) =>
+        db.Departments.Where(x => x.Id == departmentId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.DemoStaffCount, count), ct);
+
+    /// <summary>
+    /// Вернуть демо в исходное после гостей — в каждом отделе, который видно пользователю (для автосброса — во всех):
+    /// все на работу, «больше нормы» выключен, уволенные восполняются до заведённой численности. Заявки и статистика
+    /// остаются. Возвращает, сколько вернулось на работу и сколько заведено заново.
+    /// </summary>
+    internal static async Task<(int Back, int Added)> ResetDemoAsync(IServiceProvider services, Func<int, bool> visible,
+        bool automatic, CancellationToken ct)
+    {
+        var db = services.GetRequiredService<IBalancerDbContext>();
+        var staff = services.GetRequiredService<StaffService>();
+        var directory = services.GetRequiredService<ExecutorDirectory>();
+        var client = services.GetRequiredService<IHttpClientFactory>().CreateClient(AisOptions.HttpClientName);
+        var departments = await db.Departments.AsNoTracking().OrderBy(x => x.Id).Select(x => x.Id).ToListAsync(ct);
+        int back = 0, added = 0;
+        foreach (var id in departments.Where(visible))
+        {
+            if (await staff.ResetDemoAsync(id, automatic, ct) is not { } result)
+            {
+                continue;
+            }
+
+            back += result.Back.Count;
+            foreach (var executor in result.Back)
+            {
+                await MirrorStaffAsync(client, db, id, executor, true, ct);
+            }
+
+            if (result.Missing > 0 && await GrowAsync(id, result.Missing, db, client, directory, ct, remember: false) is IStatusCodeHttpResult { StatusCode: 200 })
+            {
+                added += result.Missing;
+            }
+        }
+
+        return (back, added);
     }
 
     /// <summary>
@@ -435,8 +501,9 @@ public static class DemoEndpoints
     /// Добавить сотрудников к имеющимся: номера — следующие свободные в диапазоне отдела (с учётом и балансировщика,
     /// и эмулятора), имена продолжают список, прежние сотрудники не меняются.
     /// </summary>
+    /// <param name="remember">Запомнить новую численность как исходную для сброса демо (не при самом сбросе).</param>
     private static async Task<IResult> GrowAsync(int departmentId, int count, IBalancerDbContext db, HttpClient client,
-        ExecutorDirectory directory, CancellationToken ct)
+        ExecutorDirectory directory, CancellationToken ct, bool remember = true)
     {
         var code = await CodeAsync(db, new DepartmentScope(departmentId), ct);
         var first = (departmentId - 1L) * IdsPerDepartment + 1;
@@ -474,7 +541,17 @@ public static class DemoEndpoints
             NameOffset = existing,
         };
         var created = await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
-        return created.Error ?? Results.Ok(new { Added = count, Removed = 0 });
+        if (created.Error is not null)
+        {
+            return created.Error;
+        }
+
+        if (remember)
+        {
+            await RememberStaffAsync(db, departmentId, existing + count, ct);
+        }
+
+        return Results.Ok(new { Added = count, Removed = 0 });
     }
 
     /// <summary>Нормы демо-сотрудников — по сфере отдела (шаблону), чтобы они были похожи на жизнь.</summary>
