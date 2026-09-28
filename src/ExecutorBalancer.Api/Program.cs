@@ -62,6 +62,7 @@ if (app.Configuration.GetValue<bool>("Proxy:Enabled"))
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseMiddleware<SecurityHeadersMiddleware>();
+app.UseIndexPage(app.Environment);
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
