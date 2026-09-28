@@ -187,6 +187,20 @@ public static class DomainPresets
 
     public static DomainPreset? Find(string? id) => All.FirstOrDefault(p => p.Id == id);
 
+    /// <summary>
+    /// Суточные нормы демо-сотрудников по сфере — сколько заявок живой человек закрывает за смену:
+    /// консультация в банке 5–15 минут, звонок в колл-центре 3–6, задача на складе 10–30, возврат в магазине 5–10.
+    /// null — без лимита (примерно каждый пятый).
+    /// </summary>
+    public static int?[] DailyLimits(string? presetId) => presetId switch
+    {
+        "bank" => [null, 40, 60, 80, 100],
+        "support" => [null, 80, 100, 120, 150],
+        "logistics" => [null, 20, 30, 40, 60],
+        "ecommerce" => [null, 60, 80, 100, 120],
+        _ => [null, 40, 60, 80, 100],
+    };
+
     public static GeneratorHint? Hint(FieldOwner owner, string key) =>
         All.SelectMany(p => p.Fields).FirstOrDefault(f => f.Owner == owner && f.Key == key)?.Hint;
 
