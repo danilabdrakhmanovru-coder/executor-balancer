@@ -74,7 +74,7 @@ public sealed record SimulationStatus(
 public sealed class SimulationService(AisStore store, AisCommands commands, ILogger<SimulationService> logger)
     : BackgroundService
 {
-    private const int MaxFlows = 20;
+    private const int MaxFlows = 60; // обычные отделы и песочницы гостей
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(100);
 
     private readonly Random _random = new();

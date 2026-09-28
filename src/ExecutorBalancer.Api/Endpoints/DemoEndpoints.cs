@@ -24,8 +24,17 @@ public sealed class DemoOptions
     /// <summary>Пульт демонстрации: управление эмулятором АИС из интерфейса. В боевом окружении выключен.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>Через сколько минут без изменений от гостей демо само возвращается в исходное (0 — не возвращать).</summary>
+    /// <summary>Через сколько минут без обращений к сайту песочница гостя удаляется.</summary>
     public int GuestResetMinutes { get; set; } = 30;
+
+    /// <summary>Сколько песочниц гостей может быть одновременно — у каждой свой поток в эмуляторе.</summary>
+    public int MaxGuests { get; set; } = 15;
+
+    /// <summary>Сфера песочницы гостя — шаблон из DomainPresets.</summary>
+    public string GuestPreset { get; set; } = "bank";
+
+    /// <summary>С каким потоком открывается песочница гостя (0 — без потока, гость запустит сам).</summary>
+    public double GuestFlowRatePerHour { get; set; } = 1200;
 
     /// <summary>Поток, запущенный руководителем или гостем: не быстрее стольких заявок в час (4000 — как в кейсе).</summary>
     public double ManagerMaxRatePerHour { get; set; } = 4000;
@@ -70,7 +79,8 @@ public static class DemoEndpoints
         app.MapPost("/api/admin/demo-reset", async (HttpContext http, CancellationToken ct) =>
             {
                 var access = http.User.Access();
-                var (back, added, orders) = await ResetDemoAsync(http.RequestServices, access.CanSee, automatic: false, ct);
+                int? sandbox = access.Login == BuiltInAdmin.GuestLogin && access.Departments is { Count: 1 } own ? own.First() : null;
+                var (back, added, orders) = await ResetDemoAsync(http.RequestServices, access.CanSee, sandbox, ct);
                 return Results.Ok(new { Back = back, Added = added, Orders = orders });
             })
             .WithTags("Демонстрация")
@@ -255,23 +265,8 @@ public static class DemoEndpoints
                 return Invalid("ratePerHour", $"от 1 до {limits.MaxRatePerHour:0} заявок в час");
             }
 
-            var snapshot = await directory.GetAsync(d.Id, ct);
-            var body = new
-            {
-                Department = await CodeAsync(db, d, ct),
-                NextOrderId = await NextOrderIdAsync(db, ct),
-                request.RatePerHour,
-                OrderFields = Specs(snapshot, FieldOwner.Order),
-                limits.StopAfterMinutes,
-            };
-            var started = await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post, "api/ais/simulation/start", body, ct);
-            if (started.Error is null)
-            {
-                await AuditAsync(db, actor, clock, d.Id, "demo_flow_started",
-                    new { ratePerHour = request.RatePerHour, stopAfterMinutes = limits.StopAfterMinutes }, ct);
-            }
-
-            return started.Result;
+            return (await StartFlowAsync(http.CreateClient(AisOptions.HttpClientName), db, directory, actor, clock, d.Id,
+                request.RatePerHour, limits.StopAfterMinutes, ct)).Result;
         });
 
         flow.MapPost("/simulation/stop", async (DepartmentScope d, IBalancerDbContext db, IHttpClientFactory http,
@@ -414,6 +409,28 @@ public static class DemoEndpoints
     /// Завести в АИС сотрудников отдела со случайными навыками по его параметрам: номера — из диапазона отдела,
     /// прежние сотрудники отдела вне набора уходят в неактивные. Используется пультом и заполнением пустых отделов.
     /// </summary>
+    /// <summary>Поток заявок отдела в эмуляторе АИС; запуск пишется в журнал отдела.</summary>
+    internal static async Task<Relayed> StartFlowAsync(HttpClient client, IBalancerDbContext db, ExecutorDirectory directory,
+        ICurrentActor actor, TimeProvider clock, int departmentId, double ratePerHour, int? stopAfterMinutes, CancellationToken ct)
+    {
+        var snapshot = await directory.GetAsync(departmentId, ct);
+        var body = new
+        {
+            Department = await CodeAsync(db, new DepartmentScope(departmentId), ct),
+            NextOrderId = await NextOrderIdAsync(db, ct),
+            RatePerHour = ratePerHour,
+            OrderFields = Specs(snapshot, FieldOwner.Order),
+            StopAfterMinutes = stopAfterMinutes,
+        };
+        var started = await Relay(client, HttpMethod.Post, "api/ais/simulation/start", body, ct);
+        if (started.Error is null)
+        {
+            await AuditAsync(db, actor, clock, departmentId, "demo_flow_started", new { ratePerHour, stopAfterMinutes }, ct);
+        }
+
+        return started;
+    }
+
     internal static async Task<Relayed> SeedAsync(int departmentId, int count, IBalancerDbContext db, HttpClient client,
         ExecutorDirectory directory, CancellationToken ct)
     {
@@ -444,25 +461,29 @@ public static class DemoEndpoints
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.DemoStaffCount, count), ct);
 
     /// <summary>
-    /// Вернуть демо в исходное после гостей — в каждом отделе, который видно пользователю (для автосброса — во всех):
-    /// все на работу, «больше нормы» выключен, уволенные восполняются до заведённой численности. Заявки и статистика
-    /// остаются. Возвращает, сколько вернулось на работу и сколько заведено заново.
+    /// Вернуть демо в исходное — с чистого листа в каждом отделе, который видно пользователю: поток и заявки в АИС,
+    /// заявки и статистика в балансировщике удаляются, все на работу, «больше нормы» выключен, уволенные восполняются.
+    /// Песочница гостя — только если это его собственная (ownSandbox). Возвращает, сколько вернулось на работу,
+    /// сколько заведено заново и сколько заявок удалено.
     /// </summary>
     internal static async Task<(int Back, int Added, int Orders)> ResetDemoAsync(IServiceProvider services, Func<int, bool> visible,
-        bool automatic, CancellationToken ct)
+        int? ownSandbox, CancellationToken ct)
     {
         var db = services.GetRequiredService<IBalancerDbContext>();
         var staff = services.GetRequiredService<StaffService>();
         var directory = services.GetRequiredService<ExecutorDirectory>();
         var client = services.GetRequiredService<IHttpClientFactory>().CreateClient(AisOptions.HttpClientName);
         var ai = services.GetRequiredService<AiGate>();
-        var departments = await db.Departments.AsNoTracking().OrderBy(x => x.Id).Select(x => x.Id).ToListAsync(ct);
+        // песочницы гостей сбрасывает только их гость: у администратора кнопка не трогает чужие демонстрации
+        var departments = await db.Departments.AsNoTracking().OrderBy(x => x.Id).Select(x => new { x.Id, x.IsGuest })
+            .ToListAsync(ct);
+        var ids = departments.Where(x => visible(x.Id) && (!x.IsGuest || ownSandbox == x.Id)).Select(x => x.Id);
         int back = 0, added = 0, orders = 0;
-        foreach (var id in departments.Where(visible))
+        foreach (var id in ids)
         {
             // сначала АИС: поток отдела остановлен и его заявки забыты — новые не придут, пока балансировщик их удаляет
             await RelayResetAsync(client, await CodeAsync(db, new DepartmentScope(id), ct), ct);
-            if (await staff.ResetDemoAsync(id, automatic, ct) is not { } result)
+            if (await staff.ResetDemoAsync(id, automatic: false, ct) is not { } result)
             {
                 continue;
             }
@@ -486,7 +507,7 @@ public static class DemoEndpoints
 
     private static readonly JsonSerializerOptions AuditJson = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Поток и заявка вручную — в журнал: так видно, кто нагружал демо, и по ним же срабатывает автосброс после гостей.</summary>
+    /// <summary>Поток и заявка вручную — в журнал отдела: так видно, кто и когда нагружал демо.</summary>
     private static async Task AuditAsync(IBalancerDbContext db, ICurrentActor actor, TimeProvider clock, int departmentId,
         string action, object after, CancellationToken ct)
     {
@@ -503,7 +524,7 @@ public static class DemoEndpoints
         await db.SaveChangesAsync(ct);
     }
 
-    private static async Task RelayResetAsync(HttpClient client, string code, CancellationToken ct)
+    internal static async Task RelayResetAsync(HttpClient client, string code, CancellationToken ct)
     {
         if (client.BaseAddress is null)
         {

@@ -157,4 +157,41 @@ public class DepartmentTests : IAsyncLifetime
         Assert.False(await _f.Departments(d => d.ExistsAsync(ecommerce, CancellationToken.None)));
         Assert.Equal(0, await _f.Query(db => db.FieldDefinitions.CountAsync(f => f.DepartmentId == ecommerce)));
     }
+
+    [Fact]
+    public async Task GuestSandboxIsPrivateAndRemovedWhole()
+    {
+        var sandbox = await _f.Departments(d => d.CreateGuestAsync(DomainPresets.Bank, 2, CancellationToken.None));
+        Assert.True(sandbox.IsGuest);
+        Assert.StartsWith("guest-", sandbox.Code, StringComparison.Ordinal);
+        await _f.Run(async b =>
+        {
+            await b.UpsertExecutorAsync(sandbox.Id, new IncomingExecutor(9001, "Гостевой сотрудник", true, null, 1m,
+                BalancerFixture.Attributes(new
+                {
+                    min_sum = 0, max_sum = 10_000_000, order_types = new[] { "ORDER_1", "ORDER_2", "ORDER_3" },
+                    subjects = new[] { "кредит", "вклад", "карты", "ипотека", "страхование" },
+                    segments = new[] { "микро", "малый", "средний", "крупный" }, categories = new[] { "обычный", "VIP" },
+                })), CancellationToken.None);
+            return await b.ReceiveAsync(sandbox.Id, new IncomingOrder(500, null, OrderStatus.Processed,
+                BalancerFixture.Attributes(BalancerFixture.DefaultOrder())), CancellationToken.None);
+        });
+        Assert.NotNull((await _f.Query(db => db.Orders.AsNoTracking().SingleAsync(o => o.Id == 500))).ExecutorId);
+
+        // журнал песочницы не попадает в общий: другие гости и отделы её не видят
+        var shared = await _f.Config(c => c.GetAuditAsync(D, null, 50, CancellationToken.None));
+        Assert.DoesNotContain(shared, a => a.Action == "guest_sandbox_created");
+
+        // песочницы не занимают места обычных отделов, но у них свой предел
+        await _f.Departments(d => d.CreateGuestAsync(DomainPresets.Bank, 2, CancellationToken.None));
+        await Assert.ThrowsAsync<ConfigurationConflictException>(() =>
+            _f.Departments(d => d.CreateGuestAsync(DomainPresets.Bank, 2, CancellationToken.None)));
+
+        Assert.Equal([9001L], await _f.Departments(d => d.DeleteGuestAsync(sandbox.Id, CancellationToken.None)));
+        Assert.False(await _f.Query(db => db.Departments.AnyAsync(x => x.Id == sandbox.Id)));
+        Assert.False(await _f.Query(db => db.Orders.AnyAsync(o => o.DepartmentId == sandbox.Id)));
+        Assert.False(await _f.Query(db => db.Executors.AnyAsync(e => e.DepartmentId == sandbox.Id)));
+        Assert.False(await _f.Query(db => db.Rules.AnyAsync(r => r.DepartmentId == sandbox.Id)));
+        Assert.Null(await _f.Departments(d => d.DeleteGuestAsync(D, CancellationToken.None))); // обычный отдел так не удалить
+    }
 }

@@ -102,20 +102,7 @@ public sealed class StaffService(
         }
 
         var staff = await db.Executors.AsNoTracking().Where(e => e.DepartmentId == departmentId).ToListAsync(cancellationToken);
-        var orderIds = await db.Orders.AsNoTracking().Where(o => o.DepartmentId == departmentId).Select(o => o.Id)
-            .ToListAsync(cancellationToken);
-        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
-        {
-            var orders = db.Orders.Where(o => o.DepartmentId == departmentId).Select(o => o.Id);
-            await db.OutboxMessages.Where(m => orders.Contains(m.OrderId)).ExecuteDeleteAsync(cancellationToken);
-            await db.OrderStatusChanges.Where(c => c.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
-            await db.Assignments.Where(a => a.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
-            await db.ExecutorHourStats.Where(x => x.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
-            await db.EligibilityHourStats.Where(x => x.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
-            await db.Orders.Where(o => o.DepartmentId == departmentId).ExecuteDeleteAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-        }
-
+        var orderIds = await DepartmentData.WipeOrdersAsync(db, departmentId, cancellationToken);
         await loadStore.ForgetAsync(staff.Select(e => e.Id).ToList(), orderIds, balancer.Today(), balancer.CurrentHour(),
             cancellationToken);
 
