@@ -135,6 +135,19 @@ function showLogin() {
   $('app').classList.add('hidden');
   $('login').classList.remove('hidden');
   $('password').focus();
+  showGuestOption();
+}
+
+/** Кнопка «Войти как гость» — если гостевой вход включён на сервере (GUEST_ACCESS в .env). */
+async function showGuestOption() {
+  let guest = null;
+  try { ({ guest } = await api('/api/auth/options')); } catch { /* нет связи — кнопку не показываем */ }
+  $('guest-box').classList.toggle('hidden', !guest);
+  if (!guest) return;
+  $('guest-text').textContent = guest === 'Manager' ? 'Войти как гость — можно пробовать' : 'Войти как гость — только просмотр';
+  $('guest-hint').textContent = guest === 'Manager'
+    ? 'Без пароля, с правами руководителя: мониторинг, аналитика, перерывы и увольнение сотрудников, «больше нормы», ИИ-разбор. Параметры, правила, отделы, пользователи и тестовый стенд — только у администратора.'
+    : 'Без пароля, только просмотр: мониторинг, заявки, сотрудники, аналитика и настройки — изменить ничего нельзя.';
 }
 
 async function showApp(me) {
@@ -194,6 +207,17 @@ $('login-form').addEventListener('submit', async (event) => {
     $('login-error').textContent = e.status === 429 ? 'Слишком много попыток, подождите минуту' : 'Неверный логин или пароль';
   } finally {
     $('password').value = '';
+  }
+});
+
+$('guest-login').addEventListener('click', async () => {
+  $('login-error').textContent = '';
+  try {
+    await api('/api/auth/guest', { method: 'POST' });
+    await showApp(await api('/api/auth/me'));
+  } catch (e) {
+    $('login-error').textContent = e.status === 429 ? 'Слишком много попыток, подождите минуту' : 'Гостевой вход сейчас выключен';
+    showGuestOption();
   }
 });
 

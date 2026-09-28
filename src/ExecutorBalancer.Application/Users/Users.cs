@@ -26,6 +26,9 @@ public static class BuiltInAdmin
 {
     /// <summary>Встроенный администратор: пароль — ADMIN_PASSWORD из окружения, в базе не хранится.</summary>
     public const string Login = "admin";
+
+    /// <summary>Гостевой вход без пароля (кнопка на странице входа, если он включён на сервере). Логин зарезервирован.</summary>
+    public const string GuestLogin = "guest";
 }
 
 /// <summary>Что доступно пользователю: роль и отделы (null — все).</summary>
@@ -138,9 +141,9 @@ public sealed partial class UserService(IBalancerDbContext db, ICurrentActor act
         {
             errors["login"] = ["логин: 3–32 символа — латинские буквы, цифры, «.», «_», «-», начинается с буквы"];
         }
-        else if (login == BuiltInAdmin.Login)
+        else if (login is BuiltInAdmin.Login or BuiltInAdmin.GuestLogin)
         {
-            errors["login"] = ["логин «admin» занят встроенным администратором"];
+            errors["login"] = [$"логин «{login}» зарезервирован"];
         }
 
         var name = Name(input.DisplayName, errors);
