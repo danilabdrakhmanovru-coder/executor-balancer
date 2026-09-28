@@ -83,8 +83,10 @@ export async function refreshDemo() {
   renderFlow(status, summary);
   renderSimulation(status?.simulation);
   renderFeed(feed);
-  $('demo-executors-count').textContent = summary.totals.activeExecutors
-    ? `Сейчас на работе в отделе: ${summary.totals.activeExecutors}.` : 'В отделе пока нет сотрудников.';
+  const total = summary.executors?.length ?? 0;
+  $('demo-executors-count').textContent = total
+    ? `Сейчас в отделе сотрудников: ${total}, из них на работе: ${summary.totals.activeExecutors}.`
+    : 'В отделе пока нет сотрудников.';
   if (!config) await reloadConfig();
 }
 
@@ -137,8 +139,9 @@ const MAX_SEED = 100; // как DemoEndpoints.MaxSeedCount
 
 export function initDemo() {
   const count = input('number', '15', { min: '1', max: String(MAX_SEED), step: '1', required: '' });
-  $('demo-seed-count').replaceChildren(field(`Сколько сотрудников будет в отделе (до ${MAX_SEED})`, count));
-  $('demo-seed').addEventListener('click', async () => {
+  $('demo-seed-count').replaceChildren(field(`Сколько сотрудников (от 1 до ${MAX_SEED})`, count));
+  /** add — прибавить к имеющимся; exact — сделать в отделе ровно столько. */
+  const seed = async (mode) => {
     const n = Number(count.value);
     if (!Number.isInteger(n) || n < 1 || n > MAX_SEED) {
       // не отправляем заведомо неверное число: сразу говорим, что не так
@@ -146,12 +149,19 @@ export function initDemo() {
       count.focus();
       return;
     }
+    if (mode === 'exact' && !confirm(`Сделать в отделе ровно ${n} сотрудников? Недостающие будут заведены, `
+      + 'лишние — уволены (их открытые заявки перейдут коллегам).')) return;
     try {
-      const created = await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: n } });
-      toast(`В АИС заведено сотрудников отдела: ${created.length}. Навыки и лимиты — случайные по параметрам отдела.`);
-      await refreshDemo();
+      const result = await api('/api/admin/demo/executors/seed', { method: 'POST', body: { count: n, mode } });
+      toast(result.removed ? `Уволено лишних: ${result.removed}. В отделе теперь ${n}.`
+        : result.added ? `Заведено новых сотрудников: ${result.added} — навыки и лимиты случайные по параметрам отдела.`
+          : `В отделе уже ${n} сотрудников — ничего менять не нужно.`);
+      // АИС передаёт новых сотрудников балансировщику за доли секунды
+      setTimeout(refreshDemo, 800);
     } catch (e) { toast(problemText(e), 'bad'); }
-  });
+  };
+  $('demo-seed-add').addEventListener('click', () => seed('add'));
+  $('demo-seed-exact').addEventListener('click', () => seed('exact'));
 
   const rate = $('demo-rate');
   const label = () => { $('demo-rate-label').textContent = rateText(Number(rate.value)); };

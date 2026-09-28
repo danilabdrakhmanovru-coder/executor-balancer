@@ -271,7 +271,8 @@ public sealed class SimulationService(AisStore store, AisCommands commands, ILog
 
 /// <summary>
 /// Завести исполнителей отдела для демонстрации: ID FirstId..FirstId+Count-1 (у каждого отдела свой диапазон —
-/// идентификаторы в АИС общие), прежние исполнители отдела вне диапазона деактивируются.
+/// идентификаторы в АИС общие). Без <see cref="KeepOthers"/> прежние исполнители отдела вне диапазона деактивируются;
+/// с ним — добавляются к имеющимся, а имена продолжаются с <see cref="NameOffset"/>.
 /// </summary>
 public sealed record SeedExecutorsRequest(
     int Count,
@@ -280,13 +281,15 @@ public sealed record SeedExecutorsRequest(
     long FirstId = 1,
     string[]? Names = null,
     int?[]? DailyLimits = null,
-    decimal[]? Qualifications = null)
+    decimal[]? Qualifications = null,
+    bool KeepOthers = false,
+    int NameOffset = 0)
 {
     public const int MaxCount = 100;
 
     public string? Validate()
     {
-        if (!AisCommands.IsValidDepartment(Department) || FirstId is < 1 or > 1_000_000_000)
+        if (!AisCommands.IsValidDepartment(Department) || FirstId is < 1 or > 1_000_000_000 || NameOffset is < 0 or > 1_000_000)
         {
             return "неверный отдел или первый ID";
         }
@@ -312,12 +315,12 @@ public sealed record SeedExecutorsRequest(
     public IReadOnlyList<AisExecutor> Build(Random random)
     {
         var names = Names is { Length: > 0 } ? Names : ["Исполнитель"];
-        return Enumerable.Range(1, Count).Select(n => new AisExecutor
+        return Enumerable.Range(1, Count).Select(i => (Index: i, Name: i + NameOffset)).Select(x => new AisExecutor
         {
-            Id = FirstId + n - 1,
+            Id = FirstId + x.Index - 1,
             Department = Department,
             // имён меньше, чем сотрудников: первый круг — как есть, дальше с номером круга («Иванов И. 2»)
-            FullName = n <= names.Length ? names[n - 1] : $"{names[(n - 1) % names.Length]} {(n - 1) / names.Length + 1}",
+            FullName = x.Name <= names.Length ? names[x.Name - 1] : $"{names[(x.Name - 1) % names.Length]} {(x.Name - 1) / names.Length + 1}",
             IsActive = true,
             DailyLimit = DailyLimits is { Length: > 0 } ? DailyLimits[random.Next(DailyLimits.Length)] : null,
             QualificationWeight = Qualifications is { Length: > 0 } ? Qualifications[random.Next(Qualifications.Length)] : 1m,

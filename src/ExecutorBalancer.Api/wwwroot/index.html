@@ -188,11 +188,13 @@
                   <div class="card-header"><h3 class="card-title"><span class="step-no">1</span>Сотрудники отдела</h3></div>
                   <div class="card-body">
                     <p class="text-secondary">Заводит сотрудников этого отдела в АИС со случайными навыками, опытом и дневными
-                      лимитами по параметрам отдела. АИС передаёт их балансировщику. Число — сколько всего сотрудников будет в
-                      отделе (не прибавка): прежние сверх него уходят в неактивные; другие отделы не затрагиваются.</p>
+                      лимитами по параметрам отдела; АИС передаёт их балансировщику. «Добавить» — прибавляет к тем, кто уже есть.
+                      «Сделать ровно столько» — недостающих заводит, лишних увольняет (сначала неработающих, потом последних
+                      заведённых), остальных не трогает. Другие отделы не затрагиваются.</p>
                     <div id="demo-seed-count" class="mb-3"></div>
                     <div class="btn-list">
-                      <button id="demo-seed" class="btn btn-primary" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Завести сотрудников</button>
+                      <button id="demo-seed-add" class="btn btn-primary" type="button"><svg class="icon"><use href="icons.svg#user-plus"></use></svg>Добавить к имеющимся</button>
+                      <button id="demo-seed-exact" class="btn" type="button"><svg class="icon"><use href="icons.svg#users"></use></svg>Сделать ровно столько</button>
                       <a class="btn" href="#executors">Посмотреть<svg class="icon ms-1"><use href="icons.svg#arrow-right"></use></svg></a>
                     </div>
                     <p id="demo-executors-count" class="text-secondary mt-3 mb-0"></p>

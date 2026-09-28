@@ -5,6 +5,7 @@ using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
+using ExecutorBalancer.Application.Executors;
 using ExecutorBalancer.Application.Rules;
 using ExecutorBalancer.Domain;
 using ExecutorBalancer.Infrastructure.Workers;
@@ -21,7 +22,11 @@ public sealed class DemoOptions
     public bool Enabled { get; set; }
 }
 
-public sealed record SeedRequest(int Count);
+/// <param name="Mode">
+/// add — добавить столько к имеющимся; exact — сделать в отделе ровно столько (недостающих завести, лишних уволить,
+/// остальных не трогать); без режима — заменить набор тестовых сотрудников новым (прежние уходят в неактивные).
+/// </param>
+public sealed record SeedRequest(int Count, string? Mode = null);
 
 public sealed record SimulationStartRequest(double RatePerHour);
 
@@ -92,14 +97,41 @@ public static class DemoEndpoints
         });
 
         group.MapPost("/executors/seed", async (DepartmentScope d, SeedRequest request, IBalancerDbContext db,
-            IHttpClientFactory http, ExecutorDirectory directory, CancellationToken ct) =>
+            IHttpClientFactory http, ExecutorDirectory directory, StaffService staff, CancellationToken ct) =>
         {
             if (request.Count is < 1 or > MaxSeedCount)
             {
                 return Invalid("count", $"от 1 до {MaxSeedCount}");
             }
 
-            return (await SeedAsync(d.Id, request.Count, db, http.CreateClient(AisOptions.HttpClientName), directory, ct)).Result;
+            var client = http.CreateClient(AisOptions.HttpClientName);
+            switch (request.Mode)
+            {
+                case null or "replace":
+                    return (await SeedAsync(d.Id, request.Count, db, client, directory, ct)).Result;
+                case "add":
+                    return await GrowAsync(d.Id, request.Count, db, client, directory, ct);
+                case "exact":
+                    var staffNow = await db.Executors.AsNoTracking().Where(x => x.DepartmentId == d.Id)
+                        .Select(x => new { x.Id, x.IsActive }).ToListAsync(ct);
+                    if (staffNow.Count < request.Count)
+                    {
+                        return await GrowAsync(d.Id, request.Count - staffNow.Count, db, client, directory, ct);
+                    }
+
+                    // лишних — увольняем: сначала тех, кто не работает, затем последних заведённых
+                    var extra = staffNow.OrderBy(x => x.IsActive).ThenByDescending(x => x.Id)
+                        .Take(staffNow.Count - request.Count).Select(x => x.Id).ToList();
+                    foreach (var id in extra)
+                    {
+                        await staff.DismissAsync(d.Id, id, ct, force: true);
+                        await MirrorStaffAsync(client, db, d.Id, id, null, ct);
+                    }
+
+                    return Results.Ok(new { Added = 0, Removed = extra.Count });
+                default:
+                    return Invalid("mode", "add, exact или replace");
+            }
         });
 
         // новый сотрудник отдела: заводится в АИС под следующим свободным номером из диапазона отдела
@@ -397,6 +429,52 @@ public static class DemoEndpoints
         {
             errors["attributes"] = [FieldCatalog.NoSkillsMessage];
         }
+    }
+
+    /// <summary>
+    /// Добавить сотрудников к имеющимся: номера — следующие свободные в диапазоне отдела (с учётом и балансировщика,
+    /// и эмулятора), имена продолжают список, прежние сотрудники не меняются.
+    /// </summary>
+    private static async Task<IResult> GrowAsync(int departmentId, int count, IBalancerDbContext db, HttpClient client,
+        ExecutorDirectory directory, CancellationToken ct)
+    {
+        var code = await CodeAsync(db, new DepartmentScope(departmentId), ct);
+        var first = (departmentId - 1L) * IdsPerDepartment + 1;
+        var last = first + IdsPerDepartment - 1;
+        var known = await Relay(client, HttpMethod.Get, $"api/ais/executors?department={code}", null, ct);
+        if (known.Error is not null)
+        {
+            return known.Error;
+        }
+
+        var inAis = known.Body is { ValueKind: JsonValueKind.Array } list
+            ? list.EnumerateArray().Select(x => x.GetProperty("id").GetInt64()).ToList()
+            : [];
+        var inBalancer = await db.Executors.AsNoTracking().Where(x => x.Id >= first && x.Id <= last)
+            .Select(x => x.Id).ToListAsync(ct);
+        var next = inAis.Concat(inBalancer).Where(x => x >= first && x <= last).DefaultIfEmpty(first - 1).Max() + 1;
+        if (next + count - 1 > last)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "В отделе нет свободных номеров",
+                detail: $"для демонстрации — до {IdsPerDepartment} сотрудников в отделе");
+        }
+
+        var existing = await db.Executors.AsNoTracking().CountAsync(x => x.DepartmentId == departmentId, ct);
+        var snapshot = await directory.GetAsync(departmentId, ct);
+        var body = new
+        {
+            Department = code,
+            FirstId = next,
+            Count = count,
+            Fields = Specs(snapshot, FieldOwner.Executor),
+            Names = DomainPresets.ExecutorNames,
+            DailyLimits,
+            Qualifications,
+            KeepOthers = true,
+            NameOffset = existing,
+        };
+        var created = await Relay(client, HttpMethod.Post, "api/ais/executors/seed", body, ct);
+        return created.Error ?? Results.Ok(new { Added = count, Removed = 0 });
     }
 
     /// <summary>Код отдела для АИС. Формат кода проверен при создании отдела — в адрес запроса он попадает как есть.</summary>
