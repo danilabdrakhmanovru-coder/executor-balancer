@@ -4,6 +4,7 @@ using ExecutorBalancer.Api.Security;
 using ExecutorBalancer.Application;
 using ExecutorBalancer.Infrastructure;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +39,21 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<DemoWarmup>();
 
 var app = builder.Build();
+
+// за обратным прокси (Caddy на сервере): адрес посетителя и https — из его заголовков, иначе лимиты входа
+// считались бы общими на всех, а cookie не получили бы признак Secure. Сам сервис наружу не открыт
+// (порт только на 127.0.0.1), поэтому заголовкам доверяем от последнего прокси
+if (app.Configuration.GetValue<bool>("Proxy:Enabled"))
+{
+    var forwarded = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+        ForwardLimit = 1,
+    };
+    forwarded.KnownIPNetworks.Clear();
+    forwarded.KnownProxies.Clear();
+    app.UseForwardedHeaders(forwarded);
+}
 
 // ошибки отдаются как ProblemDetails без стека
 app.UseExceptionHandler();

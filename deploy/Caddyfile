@@ -1,0 +1,9 @@
+# Вход на сайт из интернета: Caddy сам получает HTTPS-сертификат Let's Encrypt для домена из .env (DOMAIN)
+# и продлевает его. Наружу открыты только 80 и 443; сервис и базы остаются во внутренней сети Docker.
+{$DOMAIN} {
+	encode zstd gzip
+	# браузер запомнит, что сайт открывается только по HTTPS
+	header Strict-Transport-Security "max-age=31536000"
+	# X-Forwarded-For и X-Forwarded-Proto Caddy передаёт сам: по ним сервис видит адрес посетителя
+	reverse_proxy api:8080
+}

@@ -19,9 +19,13 @@ tools/loadgen.py                     генератор нагрузки: мно
 scripts/check_lua.py                 проверка Lua-скриптов на живом Redis
 docs/DECISIONS.md                    трактовки ТЗ и принятые решения
 docs/ARCHITECTURE.md                 BPMN, sequence-диаграмма, ERD, алгоритм и альтернативы
+docs/DEPLOY.md                       выкладка на сервер: HTTPS (Caddy), YandexGPT Pro
+deploy/Caddyfile                     вход из интернета по HTTPS для профиля public
 ```
 
 ## Запуск (Windows PowerShell)
+
+Сайт в интернете (сервер Yandex Cloud, HTTPS, YandexGPT Pro) — пошагово в [docs/DEPLOY.md](docs/DEPLOY.md).
 
 1. Секреты — одной командой, файл `.env` создаётся со случайными значениями:
 

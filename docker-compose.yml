@@ -56,6 +56,8 @@ services:
       # своя модель без видеокарты отвечает медленно: сколько ждать ответа и сколько слов разрешить в ответе
       Ai__TimeoutSeconds: ${AI_TIMEOUT_SECONDS:-90}
       Ai__MaxTokens: ${AI_MAX_TOKENS:-1500}
+      # сайт в интернете: сервис стоит за Caddy и берёт адрес посетителя и https из его заголовков
+      Proxy__Enabled: ${PROXY_ENABLED:-false}
     # чтобы из контейнера была видна модель, запущенная на этом же компьютере (Ollama): http://host.docker.internal:11434/v1
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -91,6 +93,30 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # выход в интернет по HTTPS — только для сервера с доменом: профиль public (COMPOSE_PROFILES=demo,public в .env)
+  caddy:
+    profiles: ["public"]
+    image: caddy:2-alpine
+    depends_on:
+      - api
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
+  caddydata:
+  caddyconfig:

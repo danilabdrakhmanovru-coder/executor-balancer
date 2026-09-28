@@ -1,0 +1,205 @@
+# Сайт в интернете: Yandex Cloud + YandexGPT Pro — пошагово
+
+Итог: проект открывается по адресу вида `https://balancer-team.ru` с настоящим сертификатом, «Разбор заявок» работает
+на YandexGPT Pro. Сервер и модель — в одном кабинете Yandex Cloud, оплата в рублях российской картой.
+Займёт 40–60 минут. Команды для Windows — в PowerShell, на сервере — в терминале Linux (после `ssh`).
+
+> Цены ниже — ориентир: тарифы меняются, актуальные — в калькуляторе Yandex Cloud.
+> Сервер 2 ядра / 4 ГБ / 40 ГБ SSD — около 1000–1500 ₽ в месяц (оплата посекундная, можно удалить после хакатона);
+> YandexGPT Pro — несколько рублей за один разбор; домен `.ru` — 200–600 ₽ в год.
+
+## Как это устроено
+
+```
+посетитель ──https──▶ Caddy (порты 80, 443) ──▶ сервис (api) ──▶ PostgreSQL, Redis
+                      сам получает сертификат        │
+                      Let's Encrypt                  └──▶ YandexGPT Pro (llm.api.cloud.yandex.net)
+```
+
+Наружу открыты только 80 и 443 (и 22 для SSH). Сервис, базы и эмулятор АИС остаются во внутренней сети Docker.
+
+## 1. Аккаунт Yandex Cloud
+
+1. Зайдите на [console.yandex.cloud](https://console.yandex.cloud) с Яндекс ID.
+2. Создайте **платёжный аккаунт** (физлицо, российская карта). Новым пользователям обычно дают стартовый грант —
+   его может хватить на всё время хакатона.
+3. Будет создано облако и каталог `default`. **ID каталога** понадобится для ИИ: он виден в консоли на странице
+   каталога (строка вида `b1g…`).
+
+## 2. SSH-ключ (на своём компьютере)
+
+```powershell
+ssh-keygen -t ed25519            # Enter на все вопросы
+Get-Content $HOME\.ssh\id_ed25519.pub
+```
+
+Скопируйте выведенную строку `ssh-ed25519 AAAA… user@PC` — это публичный ключ, его можно показывать.
+Файл без `.pub` — секретный, никому не отправляйте.
+
+## 3. Сервер (виртуальная машина)
+
+Консоль → **Compute Cloud** → **Создать ВМ**:
+
+| Параметр | Значение |
+|---|---|
+| Образ | **Ubuntu 24.04 LTS** |
+| Зона | ru-central1-a (любая) |
+| Диск | SSD, **40 ГБ** |
+| Платформа | Intel Ice Lake, **2 vCPU, 100%**, **4 ГБ** памяти |
+| Сеть → публичный адрес | **Автоматически** |
+| Доступ | логин, например `team`, и SSH-ключ из шага 2 |
+
+Нажмите «Создать ВМ» и дождитесь статуса Running. Запишите **публичный IP**.
+
+Сразу сделайте адрес постоянным, иначе после перезапуска ВМ он сменится: **Virtual Private Cloud → IP-адреса** →
+у адреса ВМ «Сделать статическим».
+
+**Группа безопасности** (если в сети включены группы безопасности; по умолчанию трафик открыт): VPC →
+Группы безопасности → группа сети → входящие правила TCP 22, 80, 443 и UDP 443 из `0.0.0.0/0`.
+
+## 4. Домен
+
+Купите домен у любого регистратора (REG.RU, RU-CENTER, Timeweb — 200–600 ₽ в год) и в его DNS-настройках добавьте
+запись:
+
+| Тип | Имя | Значение |
+|---|---|---|
+| A | `@` | публичный IP сервера |
+
+Запись начинает работать за 5–30 минут. Проверка из PowerShell: `nslookup balancer-team.ru` — должен вернуться IP сервера.
+
+> Без домена сертификат не выдадут. Бесплатный запасной вариант — адрес вида `51-250-10-20.sslip.io`
+> (ваш IP через дефисы): он сразу указывает на сервер, но у таких общих доменов бывают лимиты выдачи сертификатов.
+
+## 5. Подготовка сервера
+
+Подключитесь из PowerShell:
+
+```powershell
+ssh team@<IP-сервера>
+```
+
+Дальше — команды на сервере:
+
+```bash
+# обновления и Docker
+sudo apt update && sudo apt -y upgrade
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+
+# зеркало образов: с российских адресов Docker Hub иногда отвечает отказом или «Too Many Requests»
+echo '{ "registry-mirrors": ["https://mirror.gcr.io"] }' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+
+# файрвол: только SSH и сайт
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443
+sudo ufw --force enable
+
+exit
+```
+
+Подключитесь заново (`ssh team@<IP>`), чтобы применилась группа `docker`, и проверьте: `docker run --rm hello-world`.
+
+## 6. Проект и секреты
+
+```bash
+git clone https://github.com/danilabdrakhmanovru-coder/executor-balancer.git
+cd executor-balancer
+
+s() { openssl rand -hex 16; }
+cat > .env <<EOF
+POSTGRES_PASSWORD=$(s)
+REDIS_PASSWORD=$(s)
+INTEGRATION_API_KEY=$(s)
+AIS_API_KEY=$(s)
+ADMIN_PASSWORD=$(s)
+SWAGGER_ENABLED=false
+COMPOSE_PROFILES=demo,public
+DEMO_ENABLED=true
+DOMAIN=balancer-team.ru
+PROXY_ENABLED=true
+EOF
+chmod 600 .env
+nano .env        # замените balancer-team.ru на свой домен; Ctrl+O, Enter, Ctrl+X
+cat .env         # ADMIN_PASSWORD — пароль администратора, сохраните его в менеджер паролей
+```
+
+- `COMPOSE_PROFILES=demo,public`: `demo` — эмулятор АИС и «Тестовый стенд», `public` — Caddy с HTTPS.
+  Если на показе стенд не нужен — оставьте `public` и `DEMO_ENABLED=false`.
+- `PROXY_ENABLED=true` — сервис знает, что стоит за Caddy: лимиты входа считаются по адресу посетителя, cookie — только по HTTPS.
+
+## 7. Запуск
+
+```bash
+docker compose up -d --build     # первая сборка — 5–10 минут
+docker compose ps                # api, postgres, redis, ais, caddy — Up
+docker compose logs caddy | grep -i certificate
+```
+
+Откройте `https://ваш-домен` — должен быть замок в адресной строке. Вход: логин `admin`, пароль `ADMIN_PASSWORD` из `.env`.
+
+## 8. YandexGPT Pro для «Разбора заявок»
+
+В консоли Yandex Cloud:
+
+1. **Сервисный аккаунт:** Identity and Access Management → Сервисные аккаунты → Создать: имя `balancer-ai`,
+   роль **`ai.languageModels.user`** — и больше никаких ролей.
+2. **API-ключ:** откройте аккаунт → «Создать новый ключ» → **API-ключ**, область действия —
+   `yc.ai.foundationModels.execute`. Скопируйте секрет — он показывается один раз.
+3. На сервере допишите в `.env` (подставьте ID каталога из шага 1 и ключ):
+
+```bash
+cat >> .env <<'EOF'
+AI_BASE_URL=https://llm.api.cloud.yandex.net/v1
+AI_MODEL=gpt://<ID каталога>/yandexgpt/latest
+AI_PROJECT=<ID каталога>
+AI_API_KEY=<секрет API-ключа>
+AI_TIMEOUT_SECONDS=90
+AI_MAX_TOKENS=1500
+EOF
+nano .env                          # замените <…> на свои значения
+docker compose up -d               # пересборка не нужна
+```
+
+4. На сайте: **Анализ → Разбор заявок** — надпись «Подключена модель gpt://…/yandexgpt/latest», кнопка
+   «Разобрать с ИИ» активна. Облачная модель отвечает за 10–60 секунд.
+
+- `yandexgpt/latest` — старшая модель (Pro), `yandexgpt-lite/latest` — облегчённая и дешевле. Если в AI Studio
+  появится более новая версия, имя модели — в документации AI Studio («Модели» → URI модели).
+- **Бюджет:** Биллинг → Бюджеты → создать бюджет, например 1000 ₽ с уведомлениями на 50/90/100%.
+- **Безопасность ключа:** он хранится только в `.env` на сервере, в браузер и журнал не попадает. В модель уходит
+  обезличенная сводка (цифры и номера «С-1003», без ФИО и текстов заявок). После хакатона удалите ключ или аккаунт.
+
+## 9. Перед показом
+
+- Заведите жюри пользователя с ролью **наблюдатель** («Настройки → Пользователи») — смотреть можно всё, менять нельзя.
+- «Тестовый стенд» → сотрудники и поток (за 20 минут до выступления, чтобы справедливость успела сойтись к 1–2%).
+- В браузере на ноутбуке для показа — Ctrl+Shift+R, если сайт открывался раньше.
+
+## Обновление и копии
+
+```bash
+cd ~/executor-balancer
+git pull
+docker compose up -d --build
+
+# резервная копия базы
+docker compose exec -T postgres pg_dump -U balancer balancer > backup-$(date +%F).sql
+```
+
+Остановить, не удаляя данные: `docker compose stop`. Удалить сервер после хакатона — в консоли Compute Cloud
+(и статический IP в VPC, иначе он продолжит тарифицироваться).
+
+## Если что-то не так
+
+| Симптом | Что сделать |
+|---|---|
+| сайт не открывается по домену | `nslookup домен` — должен быть IP сервера; `sudo ufw status` — открыты 80 и 443; группа безопасности в VPC |
+| браузер ругается на сертификат | `docker compose logs caddy` — Caddy пишет причину; чаще всего домен ещё не указывает на сервер. После исправления DNS: `docker compose restart caddy` |
+| `429 Too Many Requests` / `pull access denied` при сборке | зеркало образов из шага 5 (`/etc/docker/daemon.json`), затем `docker compose up -d --build` ещё раз |
+| не пускает с верным паролем, «слишком много попыток» | 5 неудачных входов с адреса за минуту — подождите минуту |
+| «модель отклонила ключ» | у сервисного аккаунта роль `ai.languageModels.user`, ключ с областью `yc.ai.foundationModels.execute`, `AI_PROJECT` = ID каталога |
+| «не найдена модель или адрес» | `AI_MODEL` = `gpt://<ID каталога>/yandexgpt/latest`, ID каталога тот же, что в `AI_PROJECT` |
+| не хватает памяти, сервис перезапускается | `docker stats`; увеличьте ВМ до 8 ГБ (Compute Cloud → ВМ → Остановить → Изменить) |
