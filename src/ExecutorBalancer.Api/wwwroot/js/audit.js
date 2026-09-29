@@ -15,6 +15,7 @@ const ACTION = {
   executors_imported: ['Загрузка из файла', 'ok'], executor_break: ['Перерыв', ''], executor_back: ['Вернулся на работу', 'ok'],
   executor_dismissed: ['Увольнение', 'bad'],
   demo_reset: ['Демо в исходном', 'ok'], demo_flow_started: ['Поток заявок запущен', ''], demo_order_sent: ['Заявка вручную', ''],
+  demo_duo_started: ['Два сотрудника', ''],
   user_created: ['Новый пользователь', 'ok'], user_updated: ['Пользователь изменён', 'warn'], user_deleted: ['Пользователь удалён', 'bad'],
 };
 const MOTIVATION = [
@@ -127,6 +128,8 @@ function describe(entry) {
     case 'demo_flow_started': return `На тестовом стенде запущен поток: ${after.ratePerHour} заявок в час`
       + (after.stopAfterMinutes ? `, остановится сам через ${after.stopAfterMinutes} мин` : '');
     case 'demo_order_sent': return `На тестовом стенде отправлена заявка вручную #${after.orderId}`;
+    case 'demo_duo_started': return `Тестовый стенд: «Два сотрудника» — ${(after.executors ?? []).join(' и ')}`
+      + (after.sameQualification === false ? ', у второго опыт ×2' : ', одинаковые');
     case 'executor_dismissed': return `${after.fullName} — увольнение, открытые заявки переданы коллегам`;
     case 'extra_mode_changed': {
       const show = (p) => (p > 0 ? `+${p}% к норме` : 'выключен');

@@ -54,6 +54,9 @@ public sealed record SeedRequest(int Count, string? Mode = null);
 
 public sealed record SimulationStartRequest(double RatePerHour);
 
+/// <param name="SameQualification">Одинаковая квалификация (по умолчанию); нет — у второго опыт ×2.</param>
+public sealed record DuoRequest(bool? SameQualification = null);
+
 public sealed record ActiveRequest(bool IsActive);
 
 public sealed record DemoOrderRequest(long? ParentId, Dictionary<string, JsonElement>? Attributes);
@@ -69,6 +72,9 @@ public static class DemoEndpoints
     public const int MaxSeedCount = 100; // столько же принимает эмулятор АИС
     public const double MaxRatePerHour = 72_000;
     private const long IdsPerDepartment = 1000;
+
+    /// <summary>Поток для показа на двух сотрудниках: заявка раз в 2–3 секунды — за решениями можно следить глазами.</summary>
+    private const double DuoRatePerHour = 1500;
 
     private static readonly decimal[] Qualifications = [0.8m, 1m, 1m, 1.2m, 1.5m, 2m];
 
@@ -308,6 +314,62 @@ public static class DemoEndpoints
             CancellationToken ct) =>
             (await Relay(http.CreateClient(AisOptions.HttpClientName), HttpMethod.Post,
                 $"api/ais/simulation/stop?department={await CodeAsync(db, d, ct)}", new { }, ct)).Result);
+
+        // «Два сотрудника»: отдел с чистого листа, двое одинаковых «умеющих всё» и медленный поток — видно,
+        // как заявки делятся между ними. Только в демо; гость — в своей песочнице (как всё заведение сотрудников).
+        group.MapPost("/scenario/duo", async (DepartmentScope d, DuoRequest request, HttpContext context,
+            IOptions<DemoOptions> options, IBalancerDbContext db, IHttpClientFactory http, ExecutorDirectory directory,
+            StaffService staff, ICurrentActor actor, TimeProvider clock, CancellationToken ct) =>
+        {
+            var client = http.CreateClient(AisOptions.HttpClientName);
+            var code = await CodeAsync(db, d, ct);
+            await RelayResetAsync(client, code, ct);                   // поток остановлен, заявки АИС забыты
+            await staff.ResetDemoAsync(d.Id, automatic: false, ct);    // заявки и статистика — с нуля
+            var previous = await db.Executors.AsNoTracking().Where(x => x.DepartmentId == d.Id).Select(x => x.Id).ToListAsync(ct);
+            foreach (var id in previous)
+            {
+                await staff.DismissAsync(d.Id, id, ct, force: true);
+                await MirrorStaffAsync(client, db, d.Id, id, null, ct);
+            }
+
+            var fields = await db.FieldDefinitions.AsNoTracking().Where(f => f.DepartmentId == d.Id).ToListAsync(ct);
+            var rules = await db.Rules.AsNoTracking().Where(r => r.DepartmentId == d.Id).ToListAsync(ct);
+            var skills = AllCapable.Skills(fields, rules);
+            // номера — после всех, кто когда-либо был в диапазоне отдела: у нового сотрудника своя история квалификации
+            var first = (d.Id - 1L) * IdsPerDepartment + 1;
+            var last = first + IdsPerDepartment - 1;
+            var used = await db.ExecutorQualifications.AsNoTracking().Where(q => q.ExecutorId >= first && q.ExecutorId <= last)
+                .Select(q => (long?)q.ExecutorId).MaxAsync(ct) ?? first - 1;
+            var ids = new[] { Math.Min(last - 1, used + 1), Math.Min(last, used + 2) };
+            var people = new[] { ("Анна С.", 1m), ("Борис К.", request.SameQualification == false ? 2m : 1m) };
+            for (var i = 0; i < 2; i++)
+            {
+                var put = await Relay(client, HttpMethod.Put, $"api/ais/executors/{ids[i]}", new
+                {
+                    Department = code, FullName = people[i].Item1, IsActive = true, DailyLimit = (int?)null,
+                    QualificationWeight = people[i].Item2, Attributes = skills,
+                }, ct);
+                if (put.Error is not null)
+                {
+                    return put.Error;
+                }
+            }
+
+            await RememberStaffAsync(db, d.Id, 2, ct);
+            // АИС передаёт сотрудников балансировщику сама — ждём обоих, чтобы первые заявки нашли их
+            var until = clock.GetUtcNow().AddSeconds(5);
+            while (clock.GetUtcNow() < until && await db.Executors.CountAsync(x => x.DepartmentId == d.Id, ct) < 2)
+            {
+                await Task.Delay(200, ct);
+            }
+
+            var limits = FlowLimitsFor(context.User, options.Value);
+            var rate = Math.Min(DuoRatePerHour, limits.MaxRatePerHour);
+            var started = await StartFlowAsync(client, db, directory, actor, clock, d.Id, rate, limits.StopAfterMinutes, ct);
+            await AuditAsync(db, actor, clock, d.Id, "demo_duo_started",
+                new { executors = people.Select(p => p.Item1), sameQualification = request.SameQualification != false }, ct);
+            return started.Error ?? Results.Ok(new { Executors = ids, RatePerHour = rate });
+        });
 
         flow.MapPost("/orders", async (DepartmentScope d, DemoOrderRequest request, IBalancerDbContext db,
             IHttpClientFactory http, ExecutorDirectory directory, ICurrentActor actor, TimeProvider clock, CancellationToken ct) =>

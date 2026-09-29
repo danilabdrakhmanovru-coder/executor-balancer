@@ -20,6 +20,7 @@ public static class DashboardEndpoints
             .AddEndpointFilter(DepartmentScope.RequireDepartment);
         group.MapGet("/summary", Summary);
         group.MapGet("/feed", Feed);
+        group.MapGet("/split", Split);
         group.MapGet("/orders", OrderList);
         group.MapGet("/orders/{id:long}", OrderDetails);
         group.MapGet("/executors/{id:long}", ExecutorPage);
@@ -32,7 +33,7 @@ public static class DashboardEndpoints
         return app;
     }
 
-    /// <summary>Периоды отчёта в запросе: today, 24h, 7d, 30d.</summary>
+    /// <summary>Периоды отчёта в запросе: 5m, 15m, today, 24h, 7d, 30d.</summary>
     public static bool TryParsePeriod(string? value, out AnalyticsPeriod period)
     {
         (var ok, period) = value switch
@@ -41,6 +42,8 @@ public static class DashboardEndpoints
             "24h" => (true, AnalyticsPeriod.Day),
             "7d" => (true, AnalyticsPeriod.Week),
             "30d" => (true, AnalyticsPeriod.Month),
+            "5m" => (true, AnalyticsPeriod.Last5Minutes),
+            "15m" => (true, AnalyticsPeriod.Last15Minutes),
             _ => (false, AnalyticsPeriod.Today),
         };
         return ok;
@@ -48,7 +51,7 @@ public static class DashboardEndpoints
 
     public static IResult BadPeriod() => Results.ValidationProblem(new Dictionary<string, string[]>
     {
-        ["period"] = ["допустимо: today, 24h, 7d, 30d"],
+        ["period"] = ["допустимо: 5m, 15m, today, 24h, 7d, 30d"],
     });
 
     private static async Task<IResult> Analytics(DepartmentScope d, string? period, AnalyticsService analytics, CancellationToken ct) =>
@@ -175,6 +178,64 @@ public static class DashboardEndpoints
             Fairness = today.Fairness,
             RuleErrors = snapshot.RuleErrors,
             Executors = executors,
+        });
+    }
+
+    private static readonly int[] SplitWindows = [1, 5, 60];
+
+    /// <summary>
+    /// Как делятся заявки между сотрудниками прямо сейчас — для показа на двух сотрудниках: нагрузка каждого за текущий
+    /// час и оценка для следующей заявки весом 1 (то, что сравнивает алгоритм), доли за 1, 5 и 60 минут и последние
+    /// решения с оценками всех кандидатов.
+    /// </summary>
+    private static async Task<IResult> Split(DepartmentScope d, IBalancerDbContext db, ILoadStore loadStore,
+        OrderBalancer balancer, TimeProvider clock, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var staff = await db.Executors.AsNoTracking().Where(e => e.DepartmentId == d.Id).OrderBy(e => e.Id)
+            .Select(e => new { e.Id, e.FullName, e.IsActive, e.QualificationWeight, e.DailyLimit })
+            .ToListAsync(ct);
+        var loads = await loadStore.GetLoadsAsync(balancer.Today(), balancer.CurrentHour(), ct);
+
+        var windows = new List<object>();
+        foreach (var minutes in SplitWindows)
+        {
+            var since = now.AddMinutes(-minutes);
+            var rows = await db.Assignments.AsNoTracking()
+                .Where(a => a.DepartmentId == d.Id && a.CreatedAt >= since)
+                .GroupBy(a => a.ExecutorId)
+                .Select(g => new { ExecutorId = g.Key, Count = g.Count(), Weight = g.Sum(a => a.OrderWeight) })
+                .ToListAsync(ct);
+            windows.Add(new { Minutes = minutes, Rows = rows });
+        }
+
+        var recent = await db.Assignments.AsNoTracking().Where(a => a.DepartmentId == d.Id)
+            .OrderByDescending(a => a.Id).Take(8)
+            .Select(a => new { a.OrderId, a.ExecutorId, a.Kind, a.OrderWeight, a.CreatedAt, a.ExplanationJson })
+            .ToListAsync(ct);
+
+        return Results.Ok(new
+        {
+            Executors = staff.Select(e =>
+            {
+                var load = loads.GetValueOrDefault(e.Id);
+                var hour = (load?.HourWeightMilli ?? 0) / 1000m;
+                var qualification = e.QualificationWeight > 0 ? e.QualificationWeight : 1m;
+                return new
+                {
+                    e.Id, e.FullName, e.IsActive, Qualification = qualification, e.DailyLimit,
+                    HourWeight = hour, NextScore = Math.Round((hour + 1) / qualification, 3),
+                    // при равной оценке за час алгоритм сравнивает открытые заявки, затем число за день
+                    OpenWeight = (load?.OpenWeightMilli ?? 0) / 1000m, AssignedToday = load?.AssignedToday ?? 0,
+                };
+            }),
+            Windows = windows,
+            Recent = recent.Select(a => new
+            {
+                a.OrderId, a.ExecutorId, Kind = a.Kind.ToString(), a.OrderWeight, a.CreatedAt,
+                Candidates = (AssignmentExplanation.FromJson(a.ExplanationJson)?.Candidates ?? [])
+                    .Select(c => new { c.ExecutorId, c.Score, c.Verdict }),
+            }),
         });
     }
 

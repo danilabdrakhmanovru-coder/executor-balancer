@@ -8,3 +8,4 @@ TestResults/
 
 # снимок Redis при локальном запуске
 dump.rdb
+__pycache__/

@@ -6,6 +6,7 @@ import { attributeForm } from './forms.js';
 import { renderExplanation, KIND } from './explain.js';
 import { openOrder } from './overview.js';
 import { showCheck } from './preview.js';
+import { initDuo, refreshDuo } from './duo.js';
 
 let config = null;
 let staff = [];
@@ -93,6 +94,7 @@ export async function refreshDemo() {
     ? `Сейчас в отделе сотрудников: ${total}, из них на работе: ${summary.totals.activeExecutors}.`
     : 'В отделе пока нет сотрудников.';
   if (!config) await reloadConfig();
+  await refreshDuo();
 }
 
 // ---------- шаги ----------
@@ -204,6 +206,7 @@ let maxSeed = 100; // как DemoEndpoints.MaxSeedCount; гостю сервер
 let seedCount = null;
 
 export function initDemo() {
+  initDuo();
   const count = input('number', '15', { min: '1', max: String(maxSeed), step: '1', required: '' });
   seedCount = count;
   renderSeedLabel();
