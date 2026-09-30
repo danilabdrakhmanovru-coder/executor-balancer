@@ -107,6 +107,22 @@ async function reloadConfig() {
 
 const SHIFT_HOURS = 8;
 
+/** Абзац, где чётные части — обычный текст, нечётные — выделены жирным (только textContent). */
+function para(...parts) {
+  const p = el('p', null, 'mb-1');
+  parts.forEach((part, i) => p.append(i % 2 ? el('strong', part) : part));
+  return p;
+}
+
+/** 1 сотрудник, 2 сотрудника, 5 сотрудников. */
+function plural(n, [one, few, many]) {
+  const d = n % 10;
+  const h = n % 100;
+  if (d === 1 && h !== 11) return one;
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return few;
+  return many;
+}
+
 /**
  * Сколько заявок в час разберут сотрудники отдела при своих нормах (смена 8 часов) и на сколько хватит норм
  * при выбранном потоке. 4000 в час из кейса — это проверка скорости: живые нормы на 10–30 человек за такой
@@ -123,16 +139,29 @@ function renderCapacity() {
     .reduce((s, e) => s + Math.max(0, e.dailyLimit - e.assignedToday), 0);
   const unlimited = active.length - limits.length;
   const rate = currentRate();
-  const lines = [el('p', `${active.length} на работе за ${SHIFT_HOURS}-часовую смену разберут около ${fmt(perHour)} заявок в час `
-    + `(нормы — ${limits.length ? `от ${limits[0]} до ${limits[limits.length - 1]} в день` : 'не заданы'}${unlimited ? `, без лимита — ${unlimited}` : ''}).`,
-  'mb-1')];
+  const perHourRound = Math.max(10, Math.round(perHour / 10) * 10);
+  const staffText = `${active.length} ${plural(active.length, ['сотрудник', 'сотрудника', 'сотрудников'])}`;
+  const lines = [];
   // предупреждение о кончающихся нормах — только если нормы есть: у всех «без лимита» кончаться нечему
   if (limits.length && rate > perHour * 1.2) {
     const minutes = Math.round(left / rate * 60);
-    lines.push(el('p', `При ${fmt(rate)} в час этого мало: оставшихся норм (${fmt(left)} заявок) хватит примерно на `
-      + `${minutes >= 90 ? `${fmt(Math.round(minutes / 6) / 10)} ч` : `${fmt(minutes)} мин`}, дальше заявки получат только `
-      + `${unlimited ? `сотрудники без лимита (${unlimited})` : 'режим «больше нормы» или они будут ждать'}. Такой поток — `
-      + 'проверка скорости; для обычного рабочего дня выберите реалистичный.', 'warn-text mb-1'));
+    const when = minutes < 1 ? 'уже почти закончились'
+      : `закончатся примерно через ${minutes >= 90 ? `${fmt(Math.round(minutes / 6) / 10)} ч` : `${fmt(minutes)} мин`}`;
+    const after = unlimited
+      ? `дальше заявки будут брать только ${unlimited} ${plural(unlimited, ['сотрудник', 'сотрудника', 'сотрудников'])} без нормы, остальные встанут в очередь`
+      : 'дальше заявки встанут в очередь (их могут взять добровольцы в режиме «больше нормы»)';
+    const box = el('div', null, 'warn-text mb-2');
+    box.append(
+      el('p', 'Поток больше, чем отдел успевает разобрать.', 'fw-bold mb-1'),
+      para(`${staffText} за смену обрабатывают около `, `${fmt(perHourRound)} заявок в час`, ', а вы выбрали ', fmt(rate), '.'),
+      para('Их дневные нормы ', when, ` — ${after}.`),
+      para('Для проверки скорости это нормально. Для обычного рабочего дня нажмите ', '«Реалистичный поток»', '.'),
+    );
+    lines.push(box);
+  } else {
+    lines.push(el('p', `${staffText} за смену обрабатывают около ${fmt(perHourRound)} заявок в час `
+      + `(нормы — ${limits.length ? `от ${limits[0]} до ${limits[limits.length - 1]} в день` : 'не заданы'}`
+      + `${unlimited && limits.length ? `, без нормы — ${unlimited}` : ''}).`, 'mb-1'));
   }
   const realistic = Math.min(Number($('demo-rate').max), Math.max(10, Math.round(perHour / 10) * 10));
   const set = el('button', null, 'btn btn-sm');
