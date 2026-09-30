@@ -93,12 +93,12 @@ export function deviation(value) {
 }
 
 let toastTimer = null;
-export function toast(text, kind = 'ok') {
+export function toast(text, kind = 'ok', ms = 3500) {
   const node = $('toast');
   node.textContent = text;
   node.className = `toast-box ${kind}`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.add('hidden'), 3500);
+  toastTimer = setTimeout(() => node.classList.add('hidden'), ms);
 }
 
 export function field(label, control, hint) {
