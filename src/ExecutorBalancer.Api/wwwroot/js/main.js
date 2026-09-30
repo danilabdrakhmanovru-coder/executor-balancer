@@ -1,6 +1,7 @@
 // Точка входа: вход, отдел, разделы и вкладки с учётом роли, периодическое обновление активной вкладки.
 import { api, onUnauthorized, problemText } from './api.js';
 import { $, el, icon } from './dom.js';
+import { hideTip } from './charts.js';
 import { setSession, session, can, demoAdmin, demoManager, demoStaff, ROLE_TITLE } from './session.js';
 import { initUsers, refreshUsers } from './users.js';
 import { initOverview, refreshOverview, resetOverview, setOverviewDemo } from './overview.js';
@@ -122,6 +123,7 @@ function renderSubnav(group) {
 }
 
 function show(tab) {
+  hideTip(); // подсказка графика с прошлой вкладки не должна висеть над новой
   const profile = PROFILE_HASH.exec(tab || '');
   if (profile) profileId = Number(profile[1]);
   active = profile ? 'profile' : TABS[tab] && tab !== 'profile' && allowed(tab) ? tab : 'start';
