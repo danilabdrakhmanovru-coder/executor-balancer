@@ -250,6 +250,11 @@
                       «работают»: каждую секунду часть назначенных заявок решается, отклоняется или уходит на доработку и потом
                       возвращается. Потоки разных отделов идут одновременно и независимо.</p>
                     <input id="demo-rate" class="form-range" type="range" min="10" max="40000" step="10" value="4000" aria-label="Скорость потока">
+                    <div class="rate-exact">
+                      <label for="demo-rate-number" class="text-secondary small">или введите точно:</label>
+                      <input id="demo-rate-number" class="form-control form-control-sm" type="number" min="1" max="40000" step="1" value="4000" inputmode="numeric">
+                      <span class="text-secondary small">заявок в час</span>
+                    </div>
                     <p id="demo-rate-label" class="rate"></p>
                     <p id="demo-rate-limit" class="text-secondary small"></p>
                     <div id="demo-capacity" class="capacity mb-3"></div>

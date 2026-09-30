@@ -122,11 +122,12 @@ function renderCapacity() {
   const left = active.filter((e) => e.dailyLimit != null)
     .reduce((s, e) => s + Math.max(0, e.dailyLimit - e.assignedToday), 0);
   const unlimited = active.length - limits.length;
-  const rate = Number($('demo-rate').value);
+  const rate = currentRate();
   const lines = [el('p', `${active.length} на работе за ${SHIFT_HOURS}-часовую смену разберут около ${fmt(perHour)} заявок в час `
     + `(нормы — ${limits.length ? `от ${limits[0]} до ${limits[limits.length - 1]} в день` : 'не заданы'}${unlimited ? `, без лимита — ${unlimited}` : ''}).`,
   'mb-1')];
-  if (rate > perHour * 1.2) {
+  // предупреждение о кончающихся нормах — только если нормы есть: у всех «без лимита» кончаться нечему
+  if (limits.length && rate > perHour * 1.2) {
     const minutes = Math.round(left / rate * 60);
     lines.push(el('p', `При ${fmt(rate)} в час этого мало: оставшихся норм (${fmt(left)} заявок) хватит примерно на `
       + `${minutes >= 90 ? `${fmt(Math.round(minutes / 6) / 10)} ч` : `${fmt(minutes)} мин`}, дальше заявки получат только `
@@ -137,10 +138,7 @@ function renderCapacity() {
   const set = el('button', null, 'btn btn-sm');
   set.type = 'button';
   set.append(icon('users'), `Реалистичный поток: ${fmt(realistic)} в час`);
-  set.addEventListener('click', () => {
-    $('demo-rate').value = String(realistic);
-    $('demo-rate').dispatchEvent(new Event('input'));
-  });
+  set.addEventListener('click', () => setRate(realistic));
   box.replaceChildren(...lines, set);
 }
 
@@ -158,11 +156,31 @@ function applyLimits(limits) {
   const max = String(Math.max(10, Math.floor(limits.maxRatePerHour / 10) * 10));
   if (rate.max === max) return;
   rate.max = max;
-  if (Number(rate.value) > Number(max)) rate.value = max;
-  rate.dispatchEvent(new Event('input'));
+  $('demo-rate-number').max = max;
+  setRate(Math.min(currentRate() || Number(max), Number(max)));
   $('demo-rate-limit').textContent = limits.stopAfterMinutes
     ? `Здесь — до ${fmt(Number(max))} заявок в час; поток сам остановится через ${limits.stopAfterMinutes} мин.`
     : '';
+}
+
+/** Скорость потока — из поля с числом: в нём можно ввести точное значение, ползунок идёт шагом 10. */
+function currentRate() { return Number($('demo-rate-number').value); }
+
+function validRate(value) {
+  return Number.isInteger(value) && value >= 1 && value <= Number($('demo-rate-number').max);
+}
+
+function setRate(value) {
+  $('demo-rate-number').value = String(value);
+  $('demo-rate-number').classList.remove('is-invalid');
+  $('demo-rate').value = String(value);
+  rateChanged();
+}
+
+function rateChanged() {
+  const value = currentRate();
+  $('demo-rate-label').textContent = validRate(value) ? rateText(value) : `Введите целое число от 1 до ${fmt(Number($('demo-rate-number').max))}`;
+  if (validRate(value)) renderCapacity();
 }
 
 function rateText(rate) {
@@ -234,12 +252,24 @@ export function initDemo() {
   $('demo-seed-exact').addEventListener('click', () => seed('exact'));
 
   const rate = $('demo-rate');
-  const label = () => { $('demo-rate-label').textContent = rateText(Number(rate.value)); renderCapacity(); };
-  rate.addEventListener('input', label);
-  label();
+  const exact = $('demo-rate-number');
+  // ползунок и поле с числом — одно значение: двигаешь ползунок — меняется число, вводишь число — встаёт ползунок
+  rate.addEventListener('input', () => { exact.value = rate.value; exact.classList.remove('is-invalid'); rateChanged(); });
+  exact.addEventListener('input', () => {
+    const ok = validRate(Number(exact.value));
+    exact.classList.toggle('is-invalid', !ok);
+    if (ok) rate.value = exact.value;
+    rateChanged();
+  });
+  rateChanged();
   $('demo-start').addEventListener('click', async () => {
+    if (!validRate(currentRate())) {
+      toast(`Скорость — целое число от 1 до ${fmt(Number(exact.max))} заявок в час`, 'bad');
+      exact.focus();
+      return;
+    }
     try {
-      await api('/api/admin/demo/simulation/start', { method: 'POST', body: { ratePerHour: Number(rate.value) } });
+      await api('/api/admin/demo/simulation/start', { method: 'POST', body: { ratePerHour: currentRate() } });
       toast('Поток заявок отдела запущен');
       await refreshDemo();
     } catch (e) { toast(problemText(e), 'bad'); }
