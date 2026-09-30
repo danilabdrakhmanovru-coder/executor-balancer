@@ -398,3 +398,7 @@ th.th-hint { cursor: help; text-decoration: underline dotted; text-underline-off
 /* на телефоне шесть кнопок периода не помещаются в строку — переносятся, страница не уезжает вбок */
 #period { flex-wrap: wrap; max-width: 100%; }
 @media (max-width: 600px) { .toast-box { left: 12px; right: 12px; max-width: none; } }
+
+/* скорость потока на стенде: ползунок и точное число рядом */
+.rate-exact { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.rate-exact input { width: 120px; }
