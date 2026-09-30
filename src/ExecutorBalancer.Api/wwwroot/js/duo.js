@@ -11,7 +11,14 @@ import { openOrder } from './overview.js';
 /** Панель — только в маленьком отделе: на 15+ сотрудниках доли смотрят в «Аналитике». */
 const MAX_PEOPLE = 4;
 const WINDOW_TITLE = { 1: 'за минуту', 5: 'за 5 минут', 60: 'за час' };
-const KIND_TITLE = { Primary: 'новая', Reassignment: 'передана', Secondary: 'с доработки' };
+/**
+ * Назначения без выбора: правило заранее говорит, кому заявка, — оценки второго не считаются.
+ * Вместо одинокой оценки пишем причину, иначе кажется, что второго «забыли».
+ */
+const NO_CHOICE = {
+  Secondary: 'возврат с доработки — тому же сотруднику, выбора нет',
+  Parent: 'продолжение заявки клиента — тому, кто ведёт первую, выбора нет',
+};
 
 let busy = false;
 
@@ -129,9 +136,11 @@ function recentList(people, recent) {
     item.title = 'Почему этот исполнитель?';
     const scores = a.candidates.filter((c) => c.score != null)
       .map((c) => `${names.get(c.executorId) ?? `#${c.executorId}`} ${fmt(Math.round(c.score * 1000) / 1000)}`).join(' · ');
+    const extra = a.kind === 'Extra' ? 'сверх нормы · ' : a.kind === 'Reassign' ? 'передана от ушедшего · ' : '';
+    const why = NO_CHOICE[a.kind] ?? (scores ? `${extra}оценки: ${scores}` : 'подходил только один');
     item.append(el('span', `#${a.orderId}`, 'feed-id'), el('span', `вес ${fmt(a.orderWeight)}`, 'muted'), el('span', '→', 'muted'),
       el('strong', names.get(a.executorId) ?? `#${a.executorId}`),
-      el('span', scores ? `оценки: ${scores}` : KIND_TITLE[a.kind] ?? a.kind, 'feed-what'));
+      el('span', why, NO_CHOICE[a.kind] ? 'muted' : 'feed-what'));
     item.addEventListener('click', () => openOrder(a.orderId));
     list.append(item);
   }
