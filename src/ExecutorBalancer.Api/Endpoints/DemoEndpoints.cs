@@ -341,7 +341,8 @@ public static class DemoEndpoints
             var used = await db.ExecutorQualifications.AsNoTracking().Where(q => q.ExecutorId >= first && q.ExecutorId <= last)
                 .Select(q => (long?)q.ExecutorId).MaxAsync(ct) ?? first - 1;
             var ids = new[] { Math.Min(last - 1, used + 1), Math.Min(last, used + 2) };
-            var people = new[] { ("Анна С.", 1m), ("Борис К.", request.SameQualification == false ? 2m : 1m) };
+            // «Фамилия И.» — как у остальных демо-сотрудников; буквы А и Б — «первый» и «второй»
+            var people = new[] { ("Андреева А.", 1m), ("Белов Б.", request.SameQualification == false ? 2m : 1m) };
             for (var i = 0; i < 2; i++)
             {
                 var put = await Relay(client, HttpMethod.Put, $"api/ais/executors/{ids[i]}", new
