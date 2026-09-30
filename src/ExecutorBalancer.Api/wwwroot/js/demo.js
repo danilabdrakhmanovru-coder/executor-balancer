@@ -94,7 +94,7 @@ export async function refreshDemo() {
     ? `Сейчас в отделе сотрудников: ${total}, из них на работе: ${summary.totals.activeExecutors}.`
     : 'В отделе пока нет сотрудников.';
   if (!config) await reloadConfig();
-  await refreshDuo();
+  await refreshDuo(total);
 }
 
 // ---------- шаги ----------

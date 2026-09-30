@@ -157,21 +157,21 @@ function recentList(people, recent) {
   return list;
 }
 
-export async function refreshDuo() {
+/** total — сколько сотрудников в отделе (из сводки стенда): в большом отделе панель не запрашивает данные зря. */
+export async function refreshDuo(total) {
   const panel = $('duo-panel');
   if (!panel || busy) return;
+  const empty = (count) => panel.replaceChildren(el('p', count
+    ? `Сейчас в отделе ${count} сотрудников — панель показывает до ${MAX_PEOPLE}. Нажмите кнопку выше, чтобы оставить двоих.`
+    : 'В отделе нет сотрудников — нажмите кнопку выше.', 'text-secondary mb-0'));
+  if (!total || total > MAX_PEOPLE) { empty(total); return; }
   const split = await api('/api/dashboard/split').catch(() => null);
   const people = split?.executors ?? [];
-  if (!people.length || people.length > MAX_PEOPLE) {
-    panel.replaceChildren(el('p', people.length
-      ? `Сейчас в отделе ${people.length} сотрудников — панель показывает до ${MAX_PEOPLE}. Нажмите кнопку выше, чтобы оставить двоих.`
-      : 'В отделе нет сотрудников — нажмите кнопку выше.', 'text-secondary mb-0'));
-    return;
-  }
-  const total = people.reduce((s, p) => s + p.hourWeight, 0);
+  if (!people.length || people.length > MAX_PEOPLE) { empty(people.length); return; }
+  const hourTotal = people.reduce((s, p) => s + p.hourWeight, 0);
   const { winner, why } = nextWinner(people);
   const grid = el('div', null, 'duo-grid');
-  grid.append(...people.map((p) => personCard(p, winner?.id === p.id, total)));
+  grid.append(...people.map((p) => personCard(p, winner?.id === p.id, hourTotal)));
   panel.replaceChildren(
     grid,
     el('p', winner ? `Следующая заявка уйдёт: ${winner.fullName} — ${why}. Меньше оценка — меньше нагрузки на единицу опыта.` : why,
