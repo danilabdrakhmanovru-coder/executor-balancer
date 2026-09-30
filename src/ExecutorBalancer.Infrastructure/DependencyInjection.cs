@@ -31,6 +31,7 @@ public static class DependencyInjection
             return ConnectionMultiplexer.Connect(options);
         });
         services.AddSingleton<ILoadStore, RedisLoadStore>();
+        services.AddSingleton<RedisStateRebuilder>();
         services.AddHostedService<StartupInitializer>();
 
         services.AddOptions<AisOptions>().Bind(configuration.GetSection(AisOptions.Section));
@@ -70,6 +71,7 @@ public static class DependencyInjection
         services.AddSingleton<Application.Insights.IAiChat, Ai.OpenAiCompatibleChat>();
         services.AddHostedService<OutboxDispatcher>();
         services.AddHostedService<PendingRetryWorker>();
+        services.AddHostedService<RedisStateGuard>();
         return services;
     }
 

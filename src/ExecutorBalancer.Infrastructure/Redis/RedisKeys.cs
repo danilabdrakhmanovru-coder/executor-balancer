@@ -15,6 +15,9 @@ internal static class RedisKeys
     public static readonly RedisKey StateReady = "{eb}:state-ready";
     public static readonly RedisKey RebuildLock = "{eb}:rebuild-lock";
 
+    /// <summary>Счётчик-«метроном» <see cref="Workers.RedisStateGuard"/>: уменьшился или пропал — Redis откатился.</summary>
+    public static readonly RedisKey Epoch = "{eb}:epoch";
+
     public static RedisKey Daily(DateOnly day) => $"{{eb}}:daily:{day:yyyyMMdd}";
 
     /// <summary>Вес, полученный каждым исполнителем за час (номер часа — unix-время / 3600).</summary>

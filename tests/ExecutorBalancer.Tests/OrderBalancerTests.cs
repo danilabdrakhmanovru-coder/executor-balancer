@@ -99,6 +99,27 @@ public class OrderBalancerTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Дочерняя заявка вернулась с доработки: это возврат к тому же сотруднику, а не новое продолжение —
+    /// в суточную норму повторно не засчитывается.
+    /// </summary>
+    [Fact]
+    public async Task ChildOrderBackFromReworkIsSecondaryAndNotCountedAgain()
+    {
+        await _f.AddExecutor(1, dailyLimit: 3);
+        await _f.Receive(1);
+        Assert.Equal(AssignmentKind.Parent, (await _f.Receive(2, parentId: 1)).Kind);
+
+        await _f.ChangeStatus(2, OrderStatus.Await);
+        var back = await _f.ChangeStatus(2, OrderStatus.Processed);
+        Assert.Equal(1, back!.ExecutorId);
+        Assert.Equal(AssignmentKind.Secondary, back.Kind);
+
+        // за день у него 2 из 3: следующая обычная заявка ещё помещается в норму
+        Assert.Equal(1, (await _f.Receive(3)).ExecutorId);
+        Assert.Null((await _f.Receive(4)).ExecutorId);
+    }
+
     [Fact]
     public async Task ParentExecutorThatNoLongerMatchesIsSkipped()
     {

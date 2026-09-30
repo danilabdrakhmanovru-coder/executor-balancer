@@ -18,6 +18,12 @@ public enum AnalyticsPeriod
 
     /// <summary>Последние 30 суток, по суткам.</summary>
     Month,
+
+    /// <summary>Последние 5 минут, по минутам: доли сотрудников «прямо сейчас».</summary>
+    Last5Minutes,
+
+    /// <summary>Последние 15 минут, по минутам.</summary>
+    Last15Minutes,
 }
 
 public sealed record TimelinePoint(
@@ -69,7 +75,8 @@ public sealed record AnalyticsReport(
     IReadOnlyList<TimelinePoint> Timeline,
     IReadOnlyList<ExecutorMetrics> Executors,
     KindBreakdown Kinds,
-    FairnessSummary Fairness);
+    FairnessSummary Fairness,
+    int BucketMinutes = 0);
 
 public sealed record LivePoint(DateTimeOffset Minute, int Assigned);
 
@@ -100,6 +107,12 @@ public sealed class AnalyticsService(
     public async Task<AnalyticsReport> BuildAsync(int departmentId, AnalyticsPeriod period,
         CancellationToken cancellationToken)
     {
+        if (period is AnalyticsPeriod.Last5Minutes or AnalyticsPeriod.Last15Minutes)
+        {
+            return await BuildRecentAsync(departmentId, period, period == AnalyticsPeriod.Last5Minutes ? 5 : 15,
+                cancellationToken);
+        }
+
         var now = clock.GetUtcNow();
         var currentHour = ExecutorStats.HourOf(now);
         var offset = (long)Math.Floor(_timeZone.GetUtcOffset(now).TotalHours);
@@ -175,6 +188,146 @@ public sealed class AnalyticsService(
 
         return new AnalyticsReport(period, ExecutorStats.HourStart(fromHour), now, size, timeline, executors, kinds,
             Fairness(executors));
+    }
+
+    /// <summary>
+    /// Последние минуты — по самим назначениям и сменам статуса, а не по часовым сводкам (они не делятся на минуты).
+    /// Эталон — тот же, что у часовых периодов, но от начала окна: к нему у каждого уже есть вес, полученный в этот час
+    /// (его видит и сам выбор), а пятиминутки, в которые окно попало частично, берутся в той доле, в какой их заявки
+    /// пришли внутри окна. Рейтинг за минуты не считается: качество оценивается от 5 закрытых заявок.
+    /// </summary>
+    private async Task<AnalyticsReport> BuildRecentAsync(int departmentId, AnalyticsPeriod period, int minutes,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.GetUtcNow();
+        var firstMinute = FloorDiv(now.ToUnixTimeSeconds(), 60) - minutes + 1;
+        var from = DateTimeOffset.FromUnixTimeSeconds(firstMinute * 60);
+        var firstHour = ExecutorStats.HourOf(from);
+        var currentHour = ExecutorStats.HourOf(now);
+        var hourStart = ExecutorStats.HourStart(firstHour);
+
+        var assignments = await db.Assignments.AsNoTracking()
+            .Where(a => a.DepartmentId == departmentId && a.CreatedAt >= hourStart)
+            .Select(a => new { a.ExecutorId, a.Kind, a.OrderWeight, a.CreatedAt })
+            .ToListAsync(cancellationToken);
+        var changes = await db.OrderStatusChanges.AsNoTracking()
+            .Where(c => c.DepartmentId == departmentId && c.At >= from && c.ExecutorId != null
+                && (c.To == OrderStatus.Accept || c.To == OrderStatus.Reject || c.To == OrderStatus.Await))
+            .Select(c => new { ExecutorId = c.ExecutorId!.Value, c.To, c.At })
+            .ToListAsync(cancellationToken);
+        var pools = await db.EligibilityHourStats.AsNoTracking()
+            .Where(s => s.DepartmentId == departmentId && s.BucketHour >= firstHour && s.BucketHour <= currentHour)
+            .ToListAsync(cancellationToken);
+        var inWindow = assignments.Where(a => a.CreatedAt >= from).ToList();
+        static bool Free(AssignmentKind kind) => kind is AssignmentKind.Primary or AssignmentKind.Reassign;
+
+        var timeline = new TimelinePoint[minutes];
+        for (var i = 0; i < minutes; i++)
+        {
+            timeline[i] = new TimelinePoint(DateTimeOffset.FromUnixTimeSeconds((firstMinute + i) * 60), 0, 0, 0, 0);
+        }
+
+        int MinuteIndex(DateTimeOffset moment) => (int)Math.Min(minutes, FloorDiv(moment.ToUnixTimeSeconds(), 60) - firstMinute);
+        foreach (var a in inWindow)
+        {
+            var i = MinuteIndex(a.CreatedAt);
+            if (i >= 0 && i < minutes)
+            {
+                timeline[i] = timeline[i] with
+                {
+                    Assigned = timeline[i].Assigned + 1, AssignedWeight = timeline[i].AssignedWeight + a.OrderWeight,
+                };
+            }
+        }
+
+        foreach (var c in changes)
+        {
+            var i = MinuteIndex(c.At);
+            if (i >= 0 && i < minutes)
+            {
+                timeline[i] = c.To == OrderStatus.Await
+                    ? timeline[i] with { Returned = timeline[i].Returned + 1 }
+                    : timeline[i] with { Closed = timeline[i].Closed + 1 };
+            }
+        }
+
+        var snapshot = await directory.GetAsync(departmentId, cancellationToken);
+        var qualificationAt = await QualificationHistoryAsync(snapshot, [], pools, cancellationToken);
+        var fair = new Dictionary<long, decimal>();
+        for (var hour = firstHour; hour <= currentHour; hour++)
+        {
+            var start = ExecutorStats.HourStart(hour);
+            var windowStart = from > start ? from : start;
+            var inHour = assignments.Where(a => ExecutorStats.HourOf(a.CreatedAt) == hour).ToList();
+            // к началу окна у каждого уже есть вес за этот час — эталон «доливает» поверх него, как и сам выбор
+            var baseline = inHour.Where(a => a.CreatedAt < windowStart).GroupBy(a => a.ExecutorId)
+                .ToDictionary(g => g.Key, g => g.Sum(a => a.OrderWeight));
+            var load = new Dictionary<long, decimal>(baseline);
+            var hourPools = pools.Where(p => p.BucketHour == hour && ExecutorStats.PinnedExecutor(p.SetKey) is null).ToList();
+            var lastSlot = hour == currentHour ? ExecutorStats.SlotOf(now) : (3600 / EligibilityHourStat.SlotSeconds) - 1;
+            for (var slot = hour == firstHour ? ExecutorStats.SlotOf(from) : 0; slot <= lastSlot; slot++)
+            {
+                var slotStart = start.AddSeconds(slot * EligibilityHourStat.SlotSeconds);
+                var slotEnd = slotStart.AddSeconds(EligibilityHourStat.SlotSeconds);
+                var slotAssignments = inHour.Where(a => a.CreatedAt >= slotStart && a.CreatedAt < slotEnd).ToList();
+                // без выбора (от родителя, с доработки, сверх нормы) — неизменная часть нагрузки
+                foreach (var a in slotAssignments.Where(a => !Free(a.Kind) && a.CreatedAt >= windowStart))
+                {
+                    load[a.ExecutorId] = load.GetValueOrDefault(a.ExecutorId) + a.OrderWeight;
+                }
+
+                var slotFree = slotAssignments.Where(a => Free(a.Kind)).Sum(a => a.OrderWeight);
+                var windowFree = slotAssignments.Where(a => Free(a.Kind) && a.CreatedAt >= windowStart).Sum(a => a.OrderWeight);
+                if (slotFree <= 0 || windowFree <= 0)
+                {
+                    continue;
+                }
+
+                var share = windowFree / slotFree;
+                load = FairShare.Allocate(
+                    hourPools.Where(p => p.Slot == slot).GroupBy(p => p.SetKey)
+                        .Select(g => new FairPool(ExecutorStats.ParseSetKey(g.Key), g.Sum(p => p.Weight) * share)),
+                    qualificationAt(slotStart.AddSeconds(EligibilityHourStat.SlotSeconds / 2)), load);
+            }
+
+            foreach (var (id, weight) in load)
+            {
+                fair[id] = fair.GetValueOrDefault(id) + weight - baseline.GetValueOrDefault(id);
+            }
+        }
+
+        var byExecutor = inWindow.GroupBy(a => a.ExecutorId).ToDictionary(g => g.Key, g => g.ToList());
+        var statusBy = changes.GroupBy(c => c.ExecutorId).ToDictionary(g => g.Key, g => g.ToList());
+        var executors = snapshot.Executors.Keys.Union(byExecutor.Keys).Union(statusBy.Keys).Order()
+            .Select(id =>
+            {
+                var profile = snapshot.Executors.GetValueOrDefault(id);
+                var mine = byExecutor.GetValueOrDefault(id) ?? [];
+                var status = statusBy.GetValueOrDefault(id) ?? [];
+                var assignedWeight = mine.Sum(a => a.OrderWeight);
+                var fairWeight = fair.GetValueOrDefault(id);
+                var closed = status.Count(c => c.To != OrderStatus.Await);
+                var returned = status.Count(c => c.To == OrderStatus.Await);
+                return new ExecutorMetrics(
+                    id, profile?.FullName ?? $"#{id}", profile?.IsActive ?? false, profile?.QualificationWeight ?? 0,
+                    mine.Count, assignedWeight,
+                    mine.Count(a => a.Kind == AssignmentKind.Primary), mine.Count(a => a.Kind == AssignmentKind.Reassign),
+                    mine.Count(a => a.Kind == AssignmentKind.Parent), mine.Count(a => a.Kind == AssignmentKind.Secondary),
+                    mine.Where(a => Free(a.Kind)).Sum(a => a.OrderWeight),
+                    Math.Round(fairWeight, 3),
+                    fairWeight >= MinFairWeightForDeviation ? Math.Round((assignedWeight - fairWeight) / fairWeight * 100m, 2) : null,
+                    closed, returned,
+                    closed + returned > 0 ? Math.Round(returned * 100m / (closed + returned), 1) : null,
+                    Extra: mine.Count(a => a.Kind == AssignmentKind.Extra));
+            })
+            .Where(m => m.IsActive || m.Assigned > 0 || m.Closed > 0 || m.Returned > 0)
+            .ToList();
+
+        var kinds = new KindBreakdown(
+            inWindow.Count(a => a.Kind == AssignmentKind.Primary), inWindow.Count(a => a.Kind == AssignmentKind.Reassign),
+            inWindow.Count(a => a.Kind == AssignmentKind.Parent), inWindow.Count(a => a.Kind == AssignmentKind.Secondary),
+            inWindow.Count(a => a.Kind == AssignmentKind.Extra));
+        return new AnalyticsReport(period, from, now, 0, timeline, executors, kinds, Fairness(executors), BucketMinutes: 1);
     }
 
     /// <summary>

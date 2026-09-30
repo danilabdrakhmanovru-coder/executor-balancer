@@ -671,6 +671,19 @@ public sealed class OrderBalancer(
         long? previousExecutorId, List<ExecutorProfile> matching, AssignmentExplanation explanation,
         CancellationToken cancellationToken)
     {
+        // сначала — возврат к прежнему исполнителю: дочерняя заявка, вернувшаяся с доработки, — это возврат
+        // (в суточную норму не считается), а не новое продолжение родительской
+        if (previousExecutorId is { } previousId)
+        {
+            var previous = matching.FirstOrDefault(e => e.Id == previousId);
+            if (previous is not null)
+            {
+                return (previous, AssignmentKind.Secondary);
+            }
+
+            explanation.Notes.Add("прежний исполнитель неактивен или больше не подходит — перераспределение");
+        }
+
         if (order.ParentId is { } parentId)
         {
             var parentExecutorId = await db.Orders.AsNoTracking()
@@ -686,17 +699,6 @@ public sealed class OrderBalancer(
             explanation.Notes.Add(parentExecutorId is null
                 ? $"у родительской заявки #{parentId} нет исполнителя"
                 : $"исполнитель родительской заявки #{parentId} неактивен или не подходит по параметрам");
-        }
-
-        if (previousExecutorId is { } previousId)
-        {
-            var previous = matching.FirstOrDefault(e => e.Id == previousId);
-            if (previous is not null)
-            {
-                return (previous, AssignmentKind.Secondary);
-            }
-
-            explanation.Notes.Add("прежний исполнитель неактивен или больше не подходит — перераспределение");
         }
 
         return null;

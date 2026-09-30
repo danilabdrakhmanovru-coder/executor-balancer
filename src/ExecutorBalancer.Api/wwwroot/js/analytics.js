@@ -3,7 +3,8 @@ import { api, scoped } from './api.js';
 import { $, el, row, fmt, deviation, emptyRow, tile, badge } from './dom.js';
 import { groupedColumns, diverging, bars, scatter } from './charts.js';
 
-const PERIODS = ['today', '24h', '7d', '30d'];
+// 5m и 15m — по минутам прямо из назначений: как делятся заявки сейчас (рейтинг за минуты не считается)
+const PERIODS = ['5m', '15m', 'today', '24h', '7d', '30d'];
 let period = 'today';
 
 function stored() {
@@ -16,6 +17,7 @@ function remember(value) {
 
 function label(point, bucketHours) {
   const date = new Date(point.start);
+  if (!bucketHours) return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // по минутам
   if (bucketHours >= 24) return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
   if (bucketHours > 1) {
     return `${date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} ${date.toLocaleTimeString('ru-RU', { hour: '2-digit' })}ч`;
@@ -81,8 +83,17 @@ function nameCell(e, extra) {
  * Рейтинг: все сотрудники без внутренней прокрутки. Сначала места (по баллам, при качестве не ниже порога),
  * затем отдельной группой — «вне рейтинга» с причиной.
  */
-function renderRating(executors, motivation) {
+function renderRating(executors, motivation, shortPeriod) {
   const threshold = percent(motivation.qualityThreshold);
+  if (shortPeriod) {
+    const text = 'Рейтинг и качество считаются за день и дольше: качество оценивается от 5 закрытых заявок. '
+      + 'Выберите «Сегодня» или больше.';
+    $('an-rating-hint').textContent = '';
+    $('an-rating').replaceChildren(emptyRow(8, text));
+    scatter($('an-scatter'), [], { threshold, empty: text });
+    $('an-attention').replaceChildren(el('div', text, 'list-group-item text-secondary'));
+    return;
+  }
   const good = percent(motivation.heavyQualityThreshold);
   const withWork = executors.filter((e) => e.closed > 0 || e.extra > 0);
   const ranked = withWork.filter((e) => e.rank).sort((a, b) => a.rank - b.rank);
@@ -161,7 +172,7 @@ export async function refreshAnalytics() {
     { label: 'сверх нормы', value: k.extra, hint: 'режим «больше нормы»: только излишки' },
   ], { empty: 'За период назначений нет' });
   renderExecutors(report.executors);
-  renderRating(report.executors, motivation);
+  renderRating(report.executors, motivation, report.bucketMinutes > 0);
 }
 
 function select(value) {
