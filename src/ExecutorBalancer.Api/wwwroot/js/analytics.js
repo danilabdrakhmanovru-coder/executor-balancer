@@ -184,7 +184,7 @@ function select(value) {
 
 /** Ссылка выгрузки — за выбранный период и по текущему отделу. */
 export function exportLink() {
-  $('export').href = scoped(`/api/dashboard/export.csv?period=${encodeURIComponent(period)}`);
+  $('export').href = scoped(`/api/dashboard/export.xlsx?period=${encodeURIComponent(period)}`);
 }
 
 /**
