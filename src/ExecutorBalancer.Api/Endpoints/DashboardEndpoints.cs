@@ -6,6 +6,7 @@ using ExecutorBalancer.Application.Balancing;
 using ExecutorBalancer.Application.Configuration;
 using ExecutorBalancer.Application.Rules;
 using ExecutorBalancer.Domain;
+using ExecutorBalancer.Infrastructure.Export;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -30,6 +31,7 @@ public static class DashboardEndpoints
         group.MapGet("/demand", (DepartmentScope d, Application.Insights.DemandAnalyzer demand, CancellationToken ct) =>
             demand.BuildAsync(d.Id, ct));
         group.MapGet("/export.csv", Export);
+        group.MapGet("/export.xlsx", ExportExcel);
         return app;
     }
 
@@ -58,9 +60,28 @@ public static class DashboardEndpoints
         TryParsePeriod(period, out var parsed) ? Results.Ok(await analytics.BuildAsync(d.Id, parsed, ct)) : BadPeriod();
 
     /// <summary>
-    /// Выгрузка для Excel: CSV в UTF-8 с BOM и разделителем «;» — так файл открывается в русском Excel
-    /// двойным щелчком. Текстовые ячейки, начинающиеся с = + - @, экранируются: имя исполнителя приходит
-    /// из внешней системы и не должно исполниться как формула.
+    /// Выгрузка в Excel (.xlsx): оформленная книга с двумя листами — сотрудники и динамика.
+    /// Текст пишется встроенными строками, поэтому формулой он не станет.
+    /// </summary>
+    private static async Task<IResult> ExportExcel(DepartmentScope d, string? period, AnalyticsService analytics,
+        IBalancerDbContext db, IOptions<BalancerOptions> options, CancellationToken ct)
+    {
+        if (!TryParsePeriod(period, out var parsed))
+        {
+            return BadPeriod();
+        }
+
+        var report = await analytics.BuildAsync(d.Id, parsed, ct);
+        var name = await db.Departments.Where(x => x.Id == d.Id).Select(x => x.Name).FirstOrDefaultAsync(ct) ?? "";
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
+        var bytes = AnalyticsWorkbook.Build(report, name, zone);
+        return Results.File(bytes, XlsxWorkbook.ContentType, $"executor-balancer-{d.Id}-{period ?? "today"}.xlsx");
+    }
+
+    /// <summary>
+    /// Выгрузка для программ и скриптов: CSV в UTF-8 с BOM и разделителем «;» (в интерфейсе — .xlsx).
+    /// Текстовые ячейки, начинающиеся с = + - @, экранируются: имя исполнителя приходит из внешней системы
+    /// и не должно исполниться как формула.
     /// </summary>
     private static async Task<IResult> Export(DepartmentScope d, string? period, AnalyticsService analytics,
         IOptions<BalancerOptions> options, CancellationToken ct)
