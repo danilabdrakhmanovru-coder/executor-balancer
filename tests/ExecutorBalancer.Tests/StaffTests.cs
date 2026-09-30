@@ -150,4 +150,35 @@ public class StaffTests : IAsyncLifetime
         await _f.Receive(1); // та же заявка после сброса — новая, а не повтор
         Assert.NotNull((await _f.Query(db => db.Orders.AsNoTracking().SingleAsync(o => o.Id == 1))).ExecutorId);
     }
+
+    /// <summary>
+    /// Сброс отдела с заявками больше чем на одну порцию удаления: всё удалено, другие отделы не тронуты.
+    /// Порции нужны серверу: сотни тысяч назначений одной командой не укладывались в таймаут.
+    /// </summary>
+    [Fact]
+    public async Task WipeRemovesOrdersInSeveralBatches()
+    {
+        const int count = Application.Executors.DepartmentData.WipeBatch * 2 + 17;
+        var now = DateTimeOffset.UtcNow;
+        await _f.Query(async db =>
+        {
+            for (var id = 1L; id <= count; id++)
+            {
+                db.Orders.Add(new Order { Id = id, DepartmentId = D, Status = OrderStatus.Accept, Weight = 1, ReceivedAt = now });
+                db.Assignments.Add(new Assignment { DepartmentId = D, OrderId = id, ExecutorId = 1, OrderWeight = 1, CreatedAt = now });
+                db.OrderStatusChanges.Add(new OrderStatusChange { DepartmentId = D, OrderId = id, To = OrderStatus.Accept, At = now });
+                db.OutboxMessages.Add(new OutboxMessage { OrderId = id, ExecutorId = 1, CreatedAt = now, NextAttemptAt = now });
+            }
+
+            return await db.SaveChangesAsync();
+        });
+
+        var removed = await _f.Query(db => Application.Executors.DepartmentData.WipeOrdersAsync(db, D, CancellationToken.None));
+
+        Assert.Equal(count, removed.Count);
+        Assert.Equal(0, await _f.Query(db => db.Orders.CountAsync()));
+        Assert.Equal(0, await _f.Query(db => db.Assignments.CountAsync()));
+        Assert.Equal(0, await _f.Query(db => db.OrderStatusChanges.CountAsync()));
+        Assert.Equal(0, await _f.Query(db => db.OutboxMessages.CountAsync()));
+    }
 }
