@@ -86,6 +86,12 @@ function tooltip() {
     tipBox.className = 'chart-tip hidden';
     tipBox.setAttribute('role', 'status');
     document.body.append(tipBox);
+    // график перерисовывается раз в несколько секунд: зона под мышью удаляется без pointerleave, и подсказка
+    // «прилипала» — даже на других вкладках. Прячем её, как только мышь не над зоной графика и при смене вкладки
+    document.addEventListener('pointermove', (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.hit')) hideTip();
+    }, { passive: true });
+    window.addEventListener('hashchange', hideTip);
   }
   return tipBox;
 }
@@ -124,7 +130,7 @@ function showTip(event, title, rows) {
   box.style.top = `${Math.max(8, y)}px`;
 }
 
-function hideTip() { tipBox?.classList.add('hidden'); }
+export function hideTip() { tipBox?.classList.add('hidden'); }
 
 /** Невидимая зона наведения крупнее самой метки — не нужно попадать точно в точку. */
 function hover(svg, attrs, onMove) {
