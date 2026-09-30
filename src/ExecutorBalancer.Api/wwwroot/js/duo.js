@@ -1,7 +1,8 @@
 // «Два сотрудника» на Тестовом стенде: двое одинаковых сотрудников и медленный поток — видно, как алгоритм делит заявки
 // поровну. Панель показывает нагрузку каждого за час и оценку, по которой решается следующая заявка, доли за 1, 5 и 60 минут
-// и последние решения с оценками обоих. Эксперименты: перерыв (второго на перерыв не отпустят — защита смены)
-// и опыт ×2 у одного. Сервер — DemoEndpoints (/scenario/duo) и DashboardEndpoints (/split).
+// и последние решения с оценками обоих. Эксперимент — перерыв (второго на перерыв не отпустят — защита смены);
+// опыт ×2 показывается отдельным запуском с чистого листа: смена опыта посреди часа пересчитала бы весь уже
+// набранный за час вес по новому опыту, и один получал бы заявки подряд до выравнивания. Сервер — DemoEndpoints (/scenario/duo) и DashboardEndpoints (/split).
 import { api, problemText } from './api.js';
 import { $, el, button, toast, fmt, badge, deviation } from './dom.js';
 import { demoStaff } from './session.js';
@@ -43,24 +44,6 @@ async function setActive(person, active) {
   }
 }
 
-async function toggleQualification(person) {
-  try {
-    const list = await api('/api/admin/demo/executors');
-    const source = list.find((x) => x.id === person.id);
-    if (!source) throw new Error('сотрудник не найден в АИС');
-    const qualificationWeight = person.qualification === 1 ? 2 : 1;
-    await api(`/api/admin/demo/executors/${person.id}`, {
-      method: 'PUT',
-      body: {
-        fullName: source.fullName, isActive: source.isActive, dailyLimit: source.dailyLimit ?? null,
-        qualificationWeight, attributes: source.attributes ?? {},
-      },
-    });
-    toast(`${person.fullName}: опыт ×${qualificationWeight} — ${qualificationWeight === 2
-      ? 'теперь должен получать примерно вдвое больше по весу' : 'снова поровну'}`);
-  } catch (e) { toast(e instanceof Error && !('status' in e) ? e.message : problemText(e), 'bad'); }
-}
-
 /** Кто получит следующую заявку весом 1 — тем же порядком, что Lua-скрипт выбора. */
 function nextWinner(people) {
   const active = people.filter((p) => p.isActive);
@@ -88,10 +71,8 @@ function personCard(p, next, total) {
       + `в работе сейчас — ${fmt(p.openWeight)}; за день заявок — ${fmt(p.assignedToday)}`, 'small text-secondary'));
   if (demoStaff()) {
     const tools = el('div', null, 'btn-list mt-2');
-    tools.append(
-      button(p.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(p, !p.isActive), 'btn btn-sm',
-        p.isActive ? 'coffee' : 'player-play'),
-      button(p.qualification === 1 ? 'Опыт ×2' : 'Опыт ×1', () => toggleQualification(p), 'btn btn-sm', 'star'));
+    tools.append(button(p.isActive ? 'На перерыв' : 'Вернуть на работу', () => setActive(p, !p.isActive), 'btn btn-sm',
+      p.isActive ? 'coffee' : 'player-play'));
     card.append(tools);
   }
   return card;
