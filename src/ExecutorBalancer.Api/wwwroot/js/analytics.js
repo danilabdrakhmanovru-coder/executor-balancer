@@ -1,6 +1,6 @@
 // Аналитика: периоды, динамика, справедливость, рейтинг и «количество против качества», типы назначений, выгрузка.
 import { api, scoped } from './api.js';
-import { $, el, row, fmt, deviation, emptyRow, tile, badge } from './dom.js';
+import { $, el, row, fmt, deviation, emptyRow, tile, badge, toast } from './dom.js';
 import { groupedColumns, diverging, bars, scatter } from './charts.js';
 
 // 5m и 15m — по минутам прямо из назначений: как делятся заявки сейчас (рейтинг за минуты не считается)
@@ -187,7 +187,22 @@ export function exportLink() {
   $('export').href = scoped(`/api/dashboard/export.csv?period=${encodeURIComponent(period)}`);
 }
 
+/**
+ * Пояснения к столбцам (title у th.th-hint): на компьютере — при наведении, а на телефоне наведения нет,
+ * поэтому нажатие (или Enter с клавиатуры) показывает то же пояснение всплывающей плашкой.
+ */
+function initColumnHints() {
+  const hints = document.querySelectorAll('#tab-analytics th.th-hint');
+  for (const th of hints) {
+    th.tabIndex = 0;
+    const show = () => toast(`${th.textContent.trim()}: ${th.title}`, 'ok', 8000);
+    th.addEventListener('click', show);
+    th.addEventListener('keydown', (event) => { if (event.key === 'Enter') show(); });
+  }
+}
+
 export function initAnalytics(onChange) {
+  initColumnHints();
   select(stored());
   $('period').addEventListener('click', (event) => {
     const value = event.target.closest('button')?.dataset.period;

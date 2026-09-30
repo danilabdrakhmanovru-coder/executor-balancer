@@ -392,3 +392,9 @@ tr.row-highlight td { background: var(--tblr-yellow-lt, rgba(247, 183, 49, .18))
 
 /* часы в шапке: цифры одной ширины — текст не дёргается каждую секунду */
 #updated { font-variant-numeric: tabular-nums; }
+
+/* заголовки таблиц с пояснением при наведении */
+th.th-hint { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: var(--muted); }
+/* на телефоне шесть кнопок периода не помещаются в строку — переносятся, страница не уезжает вбок */
+#period { flex-wrap: wrap; max-width: 100%; }
+@media (max-width: 600px) { .toast-box { left: 12px; right: 12px; max-width: none; } }
